@@ -335,7 +335,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 </div>
 
 <!-- ── SETTINGS MODAL ── -->
-<div id="settingsModal" onclick="if(event.target===this) closeSettings()">
+<div id="settingsModal" onclick="e => { if(e.target===this) closeSettings(); }">
   <div class="settings-sheet">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -1205,10 +1205,6 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function toggleAlwaysOnMic() {
   if (!SR) { toast('⚠️ Speech API not supported in this browser'); return; }
-  if (location.protocol === 'file:') {
-    toast('⚠️ Voice requires a web server — open via http://localhost or https://');
-    return;
-  }
   alwaysOnMic = !alwaysOnMic;
   if (alwaysOnMic) { startBgListen(); updateMicBadge('wake'); }
   else { stopAllRecog(); updateMicBadge('off'); }
@@ -1228,11 +1224,31 @@ function stopAllRecog() {
   document.getElementById('wakeOverlay').classList.remove('active');
 }
 
+// Mute system audio briefly during SR restart to suppress mobile beep
+let _audioCtx = null;
+let _muteNode = null;
+function muteSysAudio(ms) {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    // Create a gain node at 0 connected to destination — suppresses the click/beep
+    _muteNode = _audioCtx.createGain();
+    _muteNode.gain.setValueAtTime(0, _audioCtx.currentTime);
+    _muteNode.connect(_audioCtx.destination);
+    setTimeout(() => { try { _muteNode?.disconnect(); } catch{} }, ms);
+  } catch{}
+}
+
+const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+const BG_RESTART_DELAY = isMobile ? 150 : 300;
+
 function startBgListen() {
   if (!alwaysOnMic || micState === 'cmd') return;
   try { bgRecog?.abort(); } catch{}
   bgRecog = new SR();
-  bgRecog.continuous = true; bgRecog.interimResults = true; bgRecog.lang = 'en-US'; bgRecog.maxAlternatives = 3;
+  // On mobile, continuous=true causes frequent stops+beeps; use false and loop instead
+  bgRecog.continuous = !isMobile;
+  bgRecog.interimResults = true; bgRecog.lang = 'en-US'; bgRecog.maxAlternatives = 3;
   micState = 'wake';
   bgRecog.onresult = e => {
     if (micState !== 'wake') return;
@@ -1249,11 +1265,16 @@ function startBgListen() {
     }
     if (e.error !== 'aborted' && e.error !== 'no-speech') restartBg();
   };
-  bgRecog.onend   = () => { if (alwaysOnMic && micState === 'wake') setTimeout(restartBg, 300); };
+  bgRecog.onend = () => {
+    if (alwaysOnMic && micState === 'wake') {
+      muteSysAudio(400); // mute the beep before restart
+      setTimeout(restartBg, BG_RESTART_DELAY);
+    }
+  };
   try { bgRecog.start(); } catch{}
 }
 
-function restartBg()       { if (alwaysOnMic && micState === 'wake') startBgListen(); }
+function restartBg() { if (alwaysOnMic && micState === 'wake') startBgListen(); }
 function wakeWordDetected() {
   if (micState === 'cmd') return;
   try { bgRecog?.abort(); } catch{}
@@ -1275,14 +1296,7 @@ function listenForCommand() {
       setTimeout(startBgListen, 800);
     } else { sub.textContent = t + '…'; }
   };
-  cmdRecog.onerror = e => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      alwaysOnMic = false; stopAllRecog(); updateMicBadge('off');
-      toast('🎤 Mic permission denied — please allow microphone access and try again');
-      return;
-    }
-    hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400);
-  };
+  cmdRecog.onerror = () => { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); };
   cmdRecog.onend   = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); } };
   try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; startBgListen(); }
 }
