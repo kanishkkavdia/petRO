@@ -446,6 +446,9 @@ let isSleeping   = false;
 let mouseX = window.innerWidth/2, mouseY = window.innerHeight/2;
 let micState = 'off', alwaysOnMic = false;
 let bgRecog = null, cmdRecog = null;
+// Permanent mic stream (no beep — stream stays open forever)
+let permStream = null, permAudioCtx = null, permAnalyser = null;
+let vadActive = false, vadLoop = null;
 let inactTimer = null, zzzAnim = null, blinkTimer = null;
 let videoStream = null, currentUploadedImage = null;
 let ttsActive = false;
@@ -1199,15 +1202,16 @@ function toast(msg) {
 }
 
 // ════════════════════════════════════════════════════════
-// MIC — wake word + command
+// MIC — permanent stream (no beeps) + VAD wake word
 // ════════════════════════════════════════════════════════
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function toggleAlwaysOnMic() {
   if (!SR) { toast('⚠️ Speech API not supported in this browser'); return; }
+  if (location.protocol === 'file:') { toast('⚠️ Voice requires HTTPS — use your GitHub Pages URL'); return; }
   alwaysOnMic = !alwaysOnMic;
-  if (alwaysOnMic) { startBgListen(); updateMicBadge('wake'); }
-  else { stopAllRecog(); updateMicBadge('off'); }
+  if (alwaysOnMic) startPermMic();
+  else             stopPermMic();
 }
 
 function updateMicBadge(state) {
@@ -1217,67 +1221,93 @@ function updateMicBadge(state) {
   if (state==='cmd')  { b.className='badge mic-on';   b.textContent='🔴 REC'; }
 }
 
-function stopAllRecog() {
-  try { bgRecog?.abort(); } catch{} try { cmdRecog?.abort(); } catch{}
+// Open the mic ONCE and keep it open — no start/stop = no beep
+async function startPermMic() {
+  try {
+    permStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch(e) {
+    alwaysOnMic = false;
+    toast('🎤 Mic permission denied — please allow microphone access');
+    return;
+  }
+  permAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = permAudioCtx.createMediaStreamSource(permStream);
+  permAnalyser = permAudioCtx.createAnalyser();
+  permAnalyser.fftSize = 512;
+  src.connect(permAnalyser);
+  micState = 'wake';
+  updateMicBadge('wake');
+  startVAD();
+}
+
+function stopPermMic() {
+  vadActive = false;
+  cancelAnimationFrame(vadLoop);
+  try { permStream?.getTracks().forEach(t => t.stop()); } catch{}
+  try { permAudioCtx?.close(); } catch{}
+  try { cmdRecog?.abort(); } catch{}
+  permStream = null; permAudioCtx = null; permAnalyser = null;
   bgRecog = null; cmdRecog = null; micState = 'off';
   setListenRipples(false);
   document.getElementById('wakeOverlay').classList.remove('active');
+  updateMicBadge('off');
 }
 
-// Mute system audio briefly during SR restart to suppress mobile beep
-let _audioCtx = null;
-let _muteNode = null;
-function muteSysAudio(ms) {
-  try {
-    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (_audioCtx.state === 'suspended') _audioCtx.resume();
-    // Create a gain node at 0 connected to destination — suppresses the click/beep
-    _muteNode = _audioCtx.createGain();
-    _muteNode.gain.setValueAtTime(0, _audioCtx.currentTime);
-    _muteNode.connect(_audioCtx.destination);
-    setTimeout(() => { try { _muteNode?.disconnect(); } catch{} }, ms);
-  } catch{}
+// VAD: watch mic volume; when speech detected, fire a short SR burst for wake word
+const VAD_THRESHOLD = 18;   // RMS threshold (0-128); raise if too sensitive
+const VAD_HOLD_MS   = 600;  // how long voice must be present before firing SR
+let   vadSpeechSince = null;
+
+function startVAD() {
+  vadActive = true;
+  const buf = new Uint8Array(permAnalyser.fftSize);
+  function tick() {
+    if (!vadActive) return;
+    vadLoop = requestAnimationFrame(tick);
+    if (micState !== 'wake') return;           // don't interrupt an active command
+    permAnalyser.getByteTimeDomainData(buf);
+    // compute RMS
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) { const v = buf[i] - 128; sum += v * v; }
+    const rms = Math.sqrt(sum / buf.length);
+    if (rms > VAD_THRESHOLD) {
+      if (!vadSpeechSince) vadSpeechSince = Date.now();
+      if (Date.now() - vadSpeechSince > VAD_HOLD_MS) {
+        vadSpeechSince = null;
+        fireWakeWordCheck();   // only fires SR when voice is actually present
+      }
+    } else {
+      vadSpeechSince = null;
+    }
+  }
+  tick();
 }
 
-const isMobile = /Mobi|Android/i.test(navigator.userAgent);
-const BG_RESTART_DELAY = isMobile ? 150 : 300;
-
-function startBgListen() {
-  if (!alwaysOnMic || micState === 'cmd') return;
-  try { bgRecog?.abort(); } catch{}
-  bgRecog = new SR();
-  // On mobile, continuous=true causes frequent stops+beeps; use false and loop instead
-  bgRecog.continuous = !isMobile;
-  bgRecog.interimResults = true; bgRecog.lang = 'en-US'; bgRecog.maxAlternatives = 3;
-  micState = 'wake';
-  bgRecog.onresult = e => {
-    if (micState !== 'wake') return;
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript.toLowerCase().trim();
-      if (WAKE_WORDS.some(w => t.includes(w))) { wakeWordDetected(); return; }
+// Fire one short SR session just to transcribe what was just said
+let wakeCheckBusy = false;
+function fireWakeWordCheck() {
+  if (wakeCheckBusy || micState !== 'wake' || !alwaysOnMic) return;
+  wakeCheckBusy = true;
+  const r = new SR();
+  r.continuous = false; r.interimResults = false; r.lang = 'en-US'; r.maxAlternatives = 3;
+  r.onresult = e => {
+    for (let i = 0; i < e.results.length; i++) {
+      for (let j = 0; j < e.results[i].length; j++) {
+        const t = e.results[i][j].transcript.toLowerCase().trim();
+        if (WAKE_WORDS.some(w => t.includes(w))) { wakeCheckBusy = false; wakeWordDetected(); return; }
+      }
     }
+    wakeCheckBusy = false;
   };
-  bgRecog.onerror = e => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      alwaysOnMic = false; updateMicBadge('off');
-      toast('🎤 Mic permission denied — please allow microphone access and try again');
-      return;
-    }
-    if (e.error !== 'aborted' && e.error !== 'no-speech') restartBg();
-  };
-  bgRecog.onend = () => {
-    if (alwaysOnMic && micState === 'wake') {
-      muteSysAudio(400); // mute the beep before restart
-      setTimeout(restartBg, BG_RESTART_DELAY);
-    }
-  };
-  try { bgRecog.start(); } catch{}
+  r.onerror = () => { wakeCheckBusy = false; };
+  r.onend   = () => { wakeCheckBusy = false; };
+  try { r.start(); } catch { wakeCheckBusy = false; }
 }
 
-function restartBg() { if (alwaysOnMic && micState === 'wake') startBgListen(); }
+function stopAllRecog() { stopPermMic(); }
+
 function wakeWordDetected() {
   if (micState === 'cmd') return;
-  try { bgRecog?.abort(); } catch{}
   resetInactivity(); showWakeOverlay(); listenForCommand();
 }
 
@@ -1293,17 +1323,24 @@ function listenForCommand() {
       sub.textContent = `"${t}"`; hideWakeOverlay(); micState = 'wake';
       document.getElementById('userInput').value = t;
       appendMsg('user', t); doChat(t);
-      setTimeout(startBgListen, 800);
+      // No restart needed — stream is always on, VAD resumes automatically
     } else { sub.textContent = t + '…'; }
   };
-  cmdRecog.onerror = () => { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); };
-  cmdRecog.onend   = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); } };
-  try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; startBgListen(); }
+  cmdRecog.onerror = e => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      alwaysOnMic = false; stopPermMic();
+      toast('🎤 Mic permission denied');
+      return;
+    }
+    hideWakeOverlay(); micState = 'wake';
+  };
+  cmdRecog.onend = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; } };
+  try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; }
 }
 
 function cancelWake() {
   try { cmdRecog?.abort(); } catch{}
-  hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 300);
+  hideWakeOverlay(); micState = 'wake'; // VAD loop continues on its own
 }
 
 function showWakeOverlay() { document.getElementById('wakeOverlay').classList.add('active'); updateMicBadge('cmd'); }
