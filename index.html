@@ -446,6 +446,10 @@ let isSleeping   = false;
 let mouseX = window.innerWidth/2, mouseY = window.innerHeight/2;
 let micState = 'off', alwaysOnMic = false;
 let bgRecog = null, cmdRecog = null;
+// Permanent mic stream — stays open, no beeps
+let permStream = null, permAudioCtx = null, permAnalyser = null;
+let vadActive = false, vadLoop = null, wakeCheckBusy = false;
+let vadSpeechSince = null;
 let inactTimer = null, zzzAnim = null, blinkTimer = null;
 let videoStream = null, currentUploadedImage = null;
 let ttsActive = false;
@@ -520,50 +524,53 @@ async function toggleBLE() {
     return;
   }
 
-  // Android: check if location is on — BLE scanning silently fails without it
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  if (isAndroid) {
-    // Try to get location permission state if API available
-    if (navigator.permissions) {
+  // Android 12+: explicitly request bluetooth-related permissions via Permissions API
+  if (navigator.permissions) {
+    const btPerms = ['bluetooth', 'bluetooth-scan', 'bluetooth-connect'];
+    for (const perm of btPerms) {
       try {
-        const loc = await navigator.permissions.query({ name: 'geolocation' });
-        if (loc.state === 'denied') {
-          toast('⚠️ Android needs Location permission for BLE. Go to Chrome Settings → Site Settings → Location and allow this site.');
+        const r = await navigator.permissions.query({ name: perm });
+        if (r.state === 'denied') {
+          toast(`❌ "${perm}" permission denied. Go to Chrome Settings → Site Settings → Bluetooth and allow this site.`);
           return;
         }
-      } catch {}
+      } catch {} // permission name not supported on this browser — skip
     }
   }
 
   setBLE(null);
-  toast('🔍 Scanning… (make sure petRO is powered on)');
+  let dev = null;
 
+  // Try 1: scan by exact device name
   try {
-    // First try: scan by exact name
-    bleDevice = await navigator.bluetooth.requestDevice({
+    dev = await navigator.bluetooth.requestDevice({
       filters: [{ name: BLE_NAME }],
       optionalServices: [BLE_SERVICE]
     });
   } catch(e1) {
     if (e1.name === 'AbortError') { setBLE(false); return; }
-    // Second try: show ALL devices — lets user pick manually if name filter fails on Android
-    toast('⚠️ Name scan found nothing. Showing all nearby BLE devices…');
+    // Try 2: show all devices so user can pick manually
+    toast('⚠️ Name scan empty — showing all nearby BLE devices…');
     try {
-      bleDevice = await navigator.bluetooth.requestDevice({
+      dev = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: [BLE_SERVICE]
       });
     } catch(e2) {
       setBLE(false);
-      if (e2.name === 'NotFoundError') toast('❌ No BLE devices found at all. Is petRO powered on? Is phone Bluetooth + Location ON?');
-      else if (e2.name === 'SecurityError') toast('❌ Bluetooth permission denied by browser');
-      else if (e2.name !== 'AbortError') toast(`❌ BLE error: ${e2.message}`);
+      if (e2.name === 'AbortError') return;
+      if (e2.name === 'SecurityError') {
+        toast('❌ Bluetooth blocked by browser. In Chrome: tap ⋮ → Settings → Site settings → Bluetooth → allow this site.');
+      } else {
+        toast(`❌ BLE error: ${e2.message}`);
+      }
       return;
     }
   }
 
+  bleDevice = dev;
   bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
-  toast(`🔗 Found "${bleDevice.name}" — connecting…`);
+  toast(`🔗 Found "${bleDevice.name || 'device'}" — connecting…`);
   try {
     const server  = await bleDevice.gatt.connect();
     const service = await server.getPrimaryService(BLE_SERVICE);
@@ -578,9 +585,8 @@ async function toggleBLE() {
     resetInactivity();
   } catch(e) {
     setBLE(false);
-    if (e.message?.includes('unknown')) toast('❌ Connected but service not found — is the right firmware flashed?');
-    else toast(`❌ GATT connect failed: ${e.message}`);
-    bleDevice = null;
+    bleDevice = null; bleCmdChar = null;
+    toast(`❌ GATT failed: ${e.message}`);
   }
 }
 
@@ -1236,15 +1242,16 @@ function toast(msg) {
 }
 
 // ════════════════════════════════════════════════════════
-// MIC — wake word + command
+// MIC — permanent stream (no beeps) + VAD wake word
 // ════════════════════════════════════════════════════════
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function toggleAlwaysOnMic() {
   if (!SR) { toast('⚠️ Speech API not supported in this browser'); return; }
+  if (location.protocol === 'file:') { toast('⚠️ Voice requires HTTPS — use your GitHub Pages URL'); return; }
   alwaysOnMic = !alwaysOnMic;
-  if (alwaysOnMic) { startBgListen(); updateMicBadge('wake'); }
-  else { stopAllRecog(); updateMicBadge('off'); }
+  if (alwaysOnMic) startPermMic();
+  else             stopPermMic();
 }
 
 function updateMicBadge(state) {
@@ -1254,35 +1261,87 @@ function updateMicBadge(state) {
   if (state==='cmd')  { b.className='badge mic-on';   b.textContent='🔴 REC'; }
 }
 
-function stopAllRecog() {
-  try { bgRecog?.abort(); } catch{} try { cmdRecog?.abort(); } catch{}
+async function startPermMic() {
+  try {
+    permStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch(e) {
+    alwaysOnMic = false;
+    toast('🎤 Mic permission denied — please allow microphone access');
+    return;
+  }
+  permAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = permAudioCtx.createMediaStreamSource(permStream);
+  permAnalyser = permAudioCtx.createAnalyser();
+  permAnalyser.fftSize = 512;
+  src.connect(permAnalyser);
+  micState = 'wake';
+  updateMicBadge('wake');
+  startVAD();
+}
+
+function stopPermMic() {
+  vadActive = false;
+  cancelAnimationFrame(vadLoop);
+  try { permStream?.getTracks().forEach(t => t.stop()); } catch{}
+  try { permAudioCtx?.close(); } catch{}
+  try { cmdRecog?.abort(); } catch{}
+  permStream = null; permAudioCtx = null; permAnalyser = null;
   bgRecog = null; cmdRecog = null; micState = 'off';
   setListenRipples(false);
   document.getElementById('wakeOverlay').classList.remove('active');
+  updateMicBadge('off');
 }
 
-function startBgListen() {
-  if (!alwaysOnMic || micState === 'cmd') return;
-  try { bgRecog?.abort(); } catch{}
-  bgRecog = new SR();
-  bgRecog.continuous = true; bgRecog.interimResults = true; bgRecog.lang = 'en-US'; bgRecog.maxAlternatives = 3;
-  micState = 'wake';
-  bgRecog.onresult = e => {
+function stopAllRecog() { stopPermMic(); }
+
+const VAD_THRESHOLD = 18;
+const VAD_HOLD_MS   = 500;
+
+function startVAD() {
+  vadActive = true;
+  const buf = new Uint8Array(permAnalyser.fftSize);
+  function tick() {
+    if (!vadActive) return;
+    vadLoop = requestAnimationFrame(tick);
     if (micState !== 'wake') return;
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript.toLowerCase().trim();
-      if (WAKE_WORDS.some(w => t.includes(w))) { wakeWordDetected(); return; }
+    permAnalyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) { const v = buf[i] - 128; sum += v * v; }
+    const rms = Math.sqrt(sum / buf.length);
+    if (rms > VAD_THRESHOLD) {
+      if (!vadSpeechSince) vadSpeechSince = Date.now();
+      if (Date.now() - vadSpeechSince > VAD_HOLD_MS) {
+        vadSpeechSince = null;
+        fireWakeWordCheck();
+      }
+    } else {
+      vadSpeechSince = null;
     }
-  };
-  bgRecog.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') restartBg(); };
-  bgRecog.onend   = () => { if (alwaysOnMic && micState === 'wake') setTimeout(restartBg, 300); };
-  try { bgRecog.start(); } catch{}
+  }
+  tick();
 }
 
-function restartBg()       { if (alwaysOnMic && micState === 'wake') startBgListen(); }
+function fireWakeWordCheck() {
+  if (wakeCheckBusy || micState !== 'wake' || !alwaysOnMic) return;
+  wakeCheckBusy = true;
+  const r = new SR();
+  r.continuous = false; r.interimResults = false; r.lang = 'en-US'; r.maxAlternatives = 3;
+  r.onresult = e => {
+    for (let i = 0; i < e.results.length; i++) {
+      for (let j = 0; j < e.results[i].length; j++) {
+        const t = e.results[i][j].transcript.toLowerCase().trim();
+        if (WAKE_WORDS.some(w => t.includes(w))) { wakeCheckBusy = false; wakeWordDetected(); return; }
+      }
+    }
+    wakeCheckBusy = false;
+  };
+  r.onerror = () => { wakeCheckBusy = false; };
+  r.onend   = () => { wakeCheckBusy = false; };
+  try { r.start(); } catch { wakeCheckBusy = false; }
+}
+
 function wakeWordDetected() {
   if (micState === 'cmd') return;
-  try { bgRecog?.abort(); } catch{}
   resetInactivity(); showWakeOverlay(); listenForCommand();
 }
 
@@ -1298,17 +1357,19 @@ function listenForCommand() {
       sub.textContent = `"${t}"`; hideWakeOverlay(); micState = 'wake';
       document.getElementById('userInput').value = t;
       appendMsg('user', t); doChat(t);
-      setTimeout(startBgListen, 800);
     } else { sub.textContent = t + '…'; }
   };
-  cmdRecog.onerror = () => { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); };
-  cmdRecog.onend   = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); } };
-  try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; startBgListen(); }
+  cmdRecog.onerror = e => {
+    if (e.error === 'not-allowed') { alwaysOnMic = false; stopPermMic(); toast('🎤 Mic permission denied'); return; }
+    hideWakeOverlay(); micState = 'wake';
+  };
+  cmdRecog.onend = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; } };
+  try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; }
 }
 
 function cancelWake() {
   try { cmdRecog?.abort(); } catch{}
-  hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 300);
+  hideWakeOverlay(); micState = 'wake';
 }
 
 function showWakeOverlay() { document.getElementById('wakeOverlay').classList.add('active'); updateMicBadge('cmd'); }
