@@ -446,9 +446,6 @@ let isSleeping   = false;
 let mouseX = window.innerWidth/2, mouseY = window.innerHeight/2;
 let micState = 'off', alwaysOnMic = false;
 let bgRecog = null, cmdRecog = null;
-// Permanent mic stream (no beep — stream stays open forever)
-let permStream = null, permAudioCtx = null, permAnalyser = null;
-let vadActive = false, vadLoop = null;
 let inactTimer = null, zzzAnim = null, blinkTimer = null;
 let videoStream = null, currentUploadedImage = null;
 let ttsActive = false;
@@ -522,18 +519,55 @@ async function toggleBLE() {
     toast('❌ Web Bluetooth not supported. Use Chrome on Android or desktop Chrome.');
     return;
   }
+
+  // Android: check if location is on — BLE scanning silently fails without it
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    // Try to get location permission state if API available
+    if (navigator.permissions) {
+      try {
+        const loc = await navigator.permissions.query({ name: 'geolocation' });
+        if (loc.state === 'denied') {
+          toast('⚠️ Android needs Location permission for BLE. Go to Chrome Settings → Site Settings → Location and allow this site.');
+          return;
+        }
+      } catch {}
+    }
+  }
+
   setBLE(null);
+  toast('🔍 Scanning… (make sure petRO is powered on)');
+
   try {
+    // First try: scan by exact name
     bleDevice = await navigator.bluetooth.requestDevice({
       filters: [{ name: BLE_NAME }],
       optionalServices: [BLE_SERVICE]
     });
-    bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
-    toast('🔗 Connecting…');
+  } catch(e1) {
+    if (e1.name === 'AbortError') { setBLE(false); return; }
+    // Second try: show ALL devices — lets user pick manually if name filter fails on Android
+    toast('⚠️ Name scan found nothing. Showing all nearby BLE devices…');
+    try {
+      bleDevice = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [BLE_SERVICE]
+      });
+    } catch(e2) {
+      setBLE(false);
+      if (e2.name === 'NotFoundError') toast('❌ No BLE devices found at all. Is petRO powered on? Is phone Bluetooth + Location ON?');
+      else if (e2.name === 'SecurityError') toast('❌ Bluetooth permission denied by browser');
+      else if (e2.name !== 'AbortError') toast(`❌ BLE error: ${e2.message}`);
+      return;
+    }
+  }
+
+  bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
+  toast(`🔗 Found "${bleDevice.name}" — connecting…`);
+  try {
     const server  = await bleDevice.gatt.connect();
     const service = await server.getPrimaryService(BLE_SERVICE);
     bleCmdChar    = await service.getCharacteristic(BLE_CMD_CHAR);
-    // Subscribe to heartbeat to keep ESP32 keepalive happy
     try {
       const hb = await service.getCharacteristic(BLE_HB_CHAR);
       await hb.startNotifications();
@@ -544,9 +578,9 @@ async function toggleBLE() {
     resetInactivity();
   } catch(e) {
     setBLE(false);
-    if (e.name === 'NotFoundError') toast('❌ petRO not found — is it powered on?');
-    else if (e.name === 'SecurityError') toast('❌ Bluetooth permission denied');
-    else if (e.name !== 'AbortError') toast(`❌ ${e.message}`);
+    if (e.message?.includes('unknown')) toast('❌ Connected but service not found — is the right firmware flashed?');
+    else toast(`❌ GATT connect failed: ${e.message}`);
+    bleDevice = null;
   }
 }
 
@@ -1202,16 +1236,15 @@ function toast(msg) {
 }
 
 // ════════════════════════════════════════════════════════
-// MIC — permanent stream (no beeps) + VAD wake word
+// MIC — wake word + command
 // ════════════════════════════════════════════════════════
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function toggleAlwaysOnMic() {
   if (!SR) { toast('⚠️ Speech API not supported in this browser'); return; }
-  if (location.protocol === 'file:') { toast('⚠️ Voice requires HTTPS — use your GitHub Pages URL'); return; }
   alwaysOnMic = !alwaysOnMic;
-  if (alwaysOnMic) startPermMic();
-  else             stopPermMic();
+  if (alwaysOnMic) { startBgListen(); updateMicBadge('wake'); }
+  else { stopAllRecog(); updateMicBadge('off'); }
 }
 
 function updateMicBadge(state) {
@@ -1221,93 +1254,35 @@ function updateMicBadge(state) {
   if (state==='cmd')  { b.className='badge mic-on';   b.textContent='🔴 REC'; }
 }
 
-// Open the mic ONCE and keep it open — no start/stop = no beep
-async function startPermMic() {
-  try {
-    permStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-  } catch(e) {
-    alwaysOnMic = false;
-    toast('🎤 Mic permission denied — please allow microphone access');
-    return;
-  }
-  permAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const src = permAudioCtx.createMediaStreamSource(permStream);
-  permAnalyser = permAudioCtx.createAnalyser();
-  permAnalyser.fftSize = 512;
-  src.connect(permAnalyser);
-  micState = 'wake';
-  updateMicBadge('wake');
-  startVAD();
-}
-
-function stopPermMic() {
-  vadActive = false;
-  cancelAnimationFrame(vadLoop);
-  try { permStream?.getTracks().forEach(t => t.stop()); } catch{}
-  try { permAudioCtx?.close(); } catch{}
-  try { cmdRecog?.abort(); } catch{}
-  permStream = null; permAudioCtx = null; permAnalyser = null;
+function stopAllRecog() {
+  try { bgRecog?.abort(); } catch{} try { cmdRecog?.abort(); } catch{}
   bgRecog = null; cmdRecog = null; micState = 'off';
   setListenRipples(false);
   document.getElementById('wakeOverlay').classList.remove('active');
-  updateMicBadge('off');
 }
 
-// VAD: watch mic volume; when speech detected, fire a short SR burst for wake word
-const VAD_THRESHOLD = 18;   // RMS threshold (0-128); raise if too sensitive
-const VAD_HOLD_MS   = 600;  // how long voice must be present before firing SR
-let   vadSpeechSince = null;
-
-function startVAD() {
-  vadActive = true;
-  const buf = new Uint8Array(permAnalyser.fftSize);
-  function tick() {
-    if (!vadActive) return;
-    vadLoop = requestAnimationFrame(tick);
-    if (micState !== 'wake') return;           // don't interrupt an active command
-    permAnalyser.getByteTimeDomainData(buf);
-    // compute RMS
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) { const v = buf[i] - 128; sum += v * v; }
-    const rms = Math.sqrt(sum / buf.length);
-    if (rms > VAD_THRESHOLD) {
-      if (!vadSpeechSince) vadSpeechSince = Date.now();
-      if (Date.now() - vadSpeechSince > VAD_HOLD_MS) {
-        vadSpeechSince = null;
-        fireWakeWordCheck();   // only fires SR when voice is actually present
-      }
-    } else {
-      vadSpeechSince = null;
+function startBgListen() {
+  if (!alwaysOnMic || micState === 'cmd') return;
+  try { bgRecog?.abort(); } catch{}
+  bgRecog = new SR();
+  bgRecog.continuous = true; bgRecog.interimResults = true; bgRecog.lang = 'en-US'; bgRecog.maxAlternatives = 3;
+  micState = 'wake';
+  bgRecog.onresult = e => {
+    if (micState !== 'wake') return;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript.toLowerCase().trim();
+      if (WAKE_WORDS.some(w => t.includes(w))) { wakeWordDetected(); return; }
     }
-  }
-  tick();
-}
-
-// Fire one short SR session just to transcribe what was just said
-let wakeCheckBusy = false;
-function fireWakeWordCheck() {
-  if (wakeCheckBusy || micState !== 'wake' || !alwaysOnMic) return;
-  wakeCheckBusy = true;
-  const r = new SR();
-  r.continuous = false; r.interimResults = false; r.lang = 'en-US'; r.maxAlternatives = 3;
-  r.onresult = e => {
-    for (let i = 0; i < e.results.length; i++) {
-      for (let j = 0; j < e.results[i].length; j++) {
-        const t = e.results[i][j].transcript.toLowerCase().trim();
-        if (WAKE_WORDS.some(w => t.includes(w))) { wakeCheckBusy = false; wakeWordDetected(); return; }
-      }
-    }
-    wakeCheckBusy = false;
   };
-  r.onerror = () => { wakeCheckBusy = false; };
-  r.onend   = () => { wakeCheckBusy = false; };
-  try { r.start(); } catch { wakeCheckBusy = false; }
+  bgRecog.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') restartBg(); };
+  bgRecog.onend   = () => { if (alwaysOnMic && micState === 'wake') setTimeout(restartBg, 300); };
+  try { bgRecog.start(); } catch{}
 }
 
-function stopAllRecog() { stopPermMic(); }
-
+function restartBg()       { if (alwaysOnMic && micState === 'wake') startBgListen(); }
 function wakeWordDetected() {
   if (micState === 'cmd') return;
+  try { bgRecog?.abort(); } catch{}
   resetInactivity(); showWakeOverlay(); listenForCommand();
 }
 
@@ -1323,24 +1298,17 @@ function listenForCommand() {
       sub.textContent = `"${t}"`; hideWakeOverlay(); micState = 'wake';
       document.getElementById('userInput').value = t;
       appendMsg('user', t); doChat(t);
-      // No restart needed — stream is always on, VAD resumes automatically
+      setTimeout(startBgListen, 800);
     } else { sub.textContent = t + '…'; }
   };
-  cmdRecog.onerror = e => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      alwaysOnMic = false; stopPermMic();
-      toast('🎤 Mic permission denied');
-      return;
-    }
-    hideWakeOverlay(); micState = 'wake';
-  };
-  cmdRecog.onend = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; } };
-  try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; }
+  cmdRecog.onerror = () => { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); };
+  cmdRecog.onend   = () => { if (micState === 'cmd') { hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 400); } };
+  try { cmdRecog.start(); } catch { hideWakeOverlay(); micState = 'wake'; startBgListen(); }
 }
 
 function cancelWake() {
   try { cmdRecog?.abort(); } catch{}
-  hideWakeOverlay(); micState = 'wake'; // VAD loop continues on its own
+  hideWakeOverlay(); micState = 'wake'; setTimeout(startBgListen, 300);
 }
 
 function showWakeOverlay() { document.getElementById('wakeOverlay').classList.add('active'); updateMicBadge('cmd'); }
