@@ -959,6 +959,48 @@ function hideWakeOverlay() { document.getElementById('wakeOverlay').classList.re
 function setListenRipples(on) { document.getElementById('rippleGroup').style.opacity = on?'1':'0'; if(on) rippleLoop(); }
 function rippleLoop() { const r1=document.getElementById('rp1'), r2=document.getElementById('rp2'); let t=0; (function f(){ t+=0.04; const s1=5+Math.sin(t)*10+10, s2=5+Math.sin(t+Math.PI)*10+10; r1.setAttribute('r',s1); r1.setAttribute('opacity',Math.max(0,0.7-s1/30)); r2.setAttribute('r',s2); r2.setAttribute('opacity',Math.max(0,0.5-s2/35)); if(document.getElementById('rippleGroup').style.opacity==='1') requestAnimationFrame(f); })(); }
 
+
+// ════════════════════════════════════════════════════════
+// MICRO-ANIMATIONS
+// ════════════════════════════════════════════════════════
+async function playAnimation(type) {
+  const overlay = document.getElementById(type === 'popcorn' ? 'anim-popcorn' : 'anim-sweat');
+  overlay.style.opacity = '1';
+  
+  if (type === 'popcorn') {
+    // Popcorn eating bounce
+    for(let i=0; i<3; i++) {
+        overlay.style.transform = 'translateY(-20px)';
+        await sleep(300);
+        overlay.style.transform = 'translateY(0px)';
+        await sleep(300);
+    }
+  } else if (type === 'exercise') {
+    // Exercise shake
+    overlay.style.transform = 'translateX(10px)';
+    await sleep(200);
+    overlay.style.transform = 'translateX(-10px)';
+    await sleep(200);
+    overlay.style.transform = 'translateX(0px)';
+  }
+  
+  overlay.style.opacity = '0';
+}
+
+// Update executeTools to include these cases:
+async function executeTools(toolCalls) {
+  for (const tc of toolCalls) {
+    // ... existing cases ...
+    case 'eat_popcorn':
+        speak("Yum! Popcorn!");
+        await playAnimation('popcorn');
+        break;
+    case 'exercise':
+        speak("Phew! Staying fit!");
+        await playAnimation('exercise');
+        break;
+  }
+}
 // ════════════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════════════
