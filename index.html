@@ -197,15 +197,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 
 /* ── MEMORY INDICATOR ── */
 #memoryPill { font-size:0.6rem; color:var(--muted); text-align:center; padding:2px 8px; opacity:0.6; }
-
-/* ── YOUTUBE IFRAME OVERLAY ── */
-#ytContainer {
-  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  background: var(--surface); z-index: 150; display: none; flex-direction: column;
-}
-#ytHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: var(--card); border-bottom: 1px solid var(--border); }
-#ytFrame { flex: 1; border: none; width: 100%; }
-.close-yt-btn { background: var(--red); color: white; border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -368,14 +359,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   </div>
 
   <div id="chatSection">
-    <div id="ytContainer">
-      <div id="ytHeader">
-        <span style="font-weight: bold; font-size: 0.8rem;">YouTube Search</span>
-        <button class="close-yt-btn" onclick="closeYouTube()">Close</button>
-      </div>
-      <iframe id="ytFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-    </div>
-
     <div class="section-label" style="padding-top:14px;">💬 Chat with petRO</div>
     <div id="messages">
       <div class="msg bot">
@@ -385,9 +368,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     </div>
     <div class="sugs">
       <button class="sug" style="color:var(--theme-color);border-color:var(--theme-glow);" onclick="manualCapture()">📸 Snap</button>
-      <button class="sug" onclick="sendSug('Tell me a joke!')">😂 Joke</button>
+      <button class="sug" onclick="sendSug('Walk forward for 3 seconds then nod 2 times')">🏃 Combo Move</button>
       <button class="sug" onclick="sendSug('Dance!')">💃 Dance</button>
-      <button class="sug" onclick="sendSug('Go forward')">⬆ Fwd</button>
       <button class="sug" onclick="sendSug('Play lofi hip hop on youtube')">🎵 Lofi</button>
       <button class="sug" onclick="sendSug('What can you do?')">🤔 Help</button>
     </div>
