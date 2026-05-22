@@ -145,26 +145,22 @@ function applyTheme() {
   const t = THEMES[tId];
   const root = document.documentElement;
   
-  // Set global colors
   root.style.setProperty('--theme-color', t.color);
   root.style.setProperty('--bg', t.bg);
   root.style.setProperty('--surface', t.surface);
   root.style.setProperty('--card', t.card);
   
-  // Update core SVG gradients
   document.getElementById('stop1-2').setAttribute('stop-color', t.color);
   document.getElementById('stop2-2').setAttribute('stop-color', t.color);
   document.getElementById('lGlow').setAttribute('stroke', t.color);
   document.getElementById('rGlow').setAttribute('stroke', t.color);
 
-  // Toggle visual SVG shapes based on character selection
   const addons = ['dog', 'terminator', 'monkey', 'starwars', 'transformer'];
   addons.forEach(addon => {
     const el = document.getElementById('theme-' + addon);
     if (el) el.style.opacity = (tId === addon) ? '1' : '0';
   });
 
-  // Unique Face Handling (Transformer faceplate covers the smile entirely)
   const mouthGroup = document.getElementById('mouthGroup');
   const mouthRim = document.getElementById('mouthRim');
   if (tId === 'transformer') {
@@ -175,7 +171,6 @@ function applyTheme() {
     mouthRim.style.opacity = '1';
   }
 
-  // Force eye rendering reset if needed
   if (currentEmotion === 'neutral') setEmotion('neutral', true);
 }
 
@@ -345,7 +340,6 @@ function bindSensors() {
 
   window.addEventListener('deviceorientation', (e) => {
     if(isSleeping || !motionEnabled) return;
-    // Over 60 degrees tilt = afraid (lifted/dropped)
     if(Math.abs(e.beta) > 60 || Math.abs(e.gamma) > 60) {
        if(currentEmotion !== 'afraid') setEmotion('afraid');
        resetInactivity();
@@ -366,23 +360,23 @@ function buildSystemPrompt() {
   
   p += `
 AVAILABLE FUNCTIONS:
-  move_forward()  → drive forward 1s
-  move_backward() → reverse 1s
-  turn_left()     → spin left 0.5s
-  turn_right()    → spin right 0.5s
-  stop_robot()    → stop movement
-  dance()         → dance routine
-  nod_head()      → nod head
-  wander()        → random exploration
-  capture_photo() → snap picture
-  search_youtube(query) → search YouTube
+  move_forward(duration_seconds)  → drive forward for N seconds
+  move_backward(duration_seconds) → reverse for N seconds
+  turn_left(duration_seconds)     → spin left for N seconds
+  turn_right(duration_seconds)    → spin right for N seconds
+  stop_robot()                    → stop movement
+  dance()                         → dance routine
+  nod_head(times)                 → nod head N times
+  wander()                        → random exploration
+  capture_photo()                 → snap picture
+  search_youtube(query)           → search YouTube in a new tab
 
 WHEN TO CALL:
-  "go forward" → move_forward()
-  "dance"      → dance()
-  "take a photo" → capture_photo()
-  "search youtube for..." / "play ... on youtube" → search_youtube(query)
-  General chat → just respond!
+  "walk straight for 5 seconds then move left" → [move_forward(5), turn_left(1)]
+  "nod 5 times"                                → [nod_head(5)]
+  "take a photo"                               → [capture_photo()]
+  "search youtube for..."                      → [search_youtube(query)]
+  General chat                                 → just respond!
 
 VISION: Always describe image contents enthusiastically if user attaches one.
 EMOTION HINTS: append ONE tag: [emotion:neutral], [emotion:happy], [emotion:excited], [emotion:sad], [emotion:angry], [emotion:focused]`;
@@ -390,17 +384,16 @@ EMOTION HINTS: append ONE tag: [emotion:neutral], [emotion:happy], [emotion:exci
 }
 
 const TOOL_DECLARATIONS = [
-  { name:'move_forward',  description:'Drive forward 1s', parameters:{type:'OBJECT',properties:{}} },
-  { name:'move_backward', description:'Reverse 1s', parameters:{type:'OBJECT',properties:{}} },
-  { name:'turn_left',     description:'Spin left 0.5s', parameters:{type:'OBJECT',properties:{}} },
-  { name:'turn_right',    description:'Spin right 0.5s', parameters:{type:'OBJECT',properties:{}} },
+  { name:'move_forward',  description:'Drive forward for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 1)'} }} },
+  { name:'move_backward', description:'Reverse for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 1)'} }} },
+  { name:'turn_left',     description:'Spin left for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 0.5)'} }} },
+  { name:'turn_right',    description:'Spin right for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 0.5)'} }} },
   { name:'stop_robot',    description:'Stop immediately', parameters:{type:'OBJECT',properties:{}} },
   { name:'dance',         description:'Dance routine', parameters:{type:'OBJECT',properties:{}} },
-  { name:'nod_head',      description:'Nod servo head', parameters:{type:'OBJECT',properties:{}} },
+  { name:'nod_head',      description:'Nod servo head N times', parameters:{type:'OBJECT',properties:{ times: {type: 'INTEGER', description: 'Number of times to nod (default 1)'} }} },
   { name:'wander',        description:'Wander randomly', parameters:{type:'OBJECT',properties:{}} },
   { name:'capture_photo', description:'Snap photo', parameters:{type:'OBJECT',properties:{}} },
-  { name:'search_youtube',description:'Search YouTube inside app',
-    parameters:{type:'OBJECT',properties:{query:{type:'STRING',description:'Query'}},required:['query']} }
+  { name:'search_youtube',description:'Search YouTube in a new tab', parameters:{type:'OBJECT',properties:{query:{type:'STRING',description:'Query'}},required:['query']} }
 ];
 
 async function callGemini(userText, imageDataUrl = null) {
@@ -463,37 +456,56 @@ function detectEmotion(toolCalls, reply) {
 }
 
 // ════════════════════════════════════════════════════════
-// YOUTUBE IFRAME OVERLAY
-// ════════════════════════════════════════════════════════
-function openYouTube(query) {
-  const ytContainer = document.getElementById('ytContainer');
-  const ytFrame = document.getElementById('ytFrame');
-  ytFrame.src = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(query)}`;
-  ytContainer.style.display = 'flex';
-}
-
-function closeYouTube() {
-  document.getElementById('ytContainer').style.display = 'none';
-  document.getElementById('ytFrame').src = '';
-}
-
-// ════════════════════════════════════════════════════════
-// TOOL EXECUTION
+// TOOL EXECUTION (Now supports looping & timed commands)
 // ════════════════════════════════════════════════════════
 async function executeTools(toolCalls) {
   for (const tc of toolCalls) {
+    const args = tc.args || {};
     switch(tc.name) {
-      case 'move_forward':  await startDirectMove('F'); await sleep(1000); await stopDirectMove(); break;
-      case 'move_backward': await startDirectMove('B'); await sleep(1000); await stopDirectMove(); break;
-      case 'turn_left':     await startDirectMove('L'); await sleep(500);  await stopDirectMove(); break;
-      case 'turn_right':    await startDirectMove('R'); await sleep(500);  await stopDirectMove(); break;
-      case 'stop_robot':    await stopDirectMove(); break;
-      case 'dance':         await doDance(); break;
-      case 'nod_head':      await doAction('nod'); break;
-      case 'wander':        await doWander(); break;
-      case 'capture_photo': autoCapture(); break;
+      case 'move_forward':  
+        await startDirectMove('F'); 
+        await sleep((args.duration_seconds || 1) * 1000); 
+        await stopDirectMove(); await sleep(100); 
+        break;
+      case 'move_backward': 
+        await startDirectMove('B'); 
+        await sleep((args.duration_seconds || 1) * 1000); 
+        await stopDirectMove(); await sleep(100); 
+        break;
+      case 'turn_left':     
+        await startDirectMove('L'); 
+        await sleep((args.duration_seconds || 0.5) * 1000); 
+        await stopDirectMove(); await sleep(100); 
+        break;
+      case 'turn_right':    
+        await startDirectMove('R'); 
+        await sleep((args.duration_seconds || 0.5) * 1000); 
+        await stopDirectMove(); await sleep(100); 
+        break;
+      case 'stop_robot':    
+        await stopDirectMove(); 
+        break;
+      case 'dance':         
+        await doDance(); 
+        break;
+      case 'nod_head':      
+        const times = args.times || 1;
+        for (let i = 0; i < times; i++) {
+            await doAction('nod'); 
+        }
+        break;
+      case 'wander':        
+        await doWander(); 
+        break;
+      case 'capture_photo': 
+        autoCapture(); 
+        break;
       case 'search_youtube':
-        if (tc.args?.query) { toast('🔍 Opening YouTube...'); openYouTube(tc.args.query); }
+        if (args.query) { 
+          toast('🔍 Opening YouTube safely...'); 
+          // Open YouTube in an external tab to bypass security blocks
+          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(args.query)}`, '_blank'); 
+        }
         break;
     }
   }
@@ -628,7 +640,7 @@ function appendImageMsg(role, dataUrl) {
 }
 
 // ════════════════════════════════════════════════════════
-// TTS & EMOJI FILTERING
+// TTS, EMOJI FILTERING & VOICE PROFILES
 // ════════════════════════════════════════════════════════
 const synth = window.speechSynthesis;
 
@@ -638,13 +650,34 @@ function speak(text) {
   
   // Robust Emoji filtering regex
   const clean = text.replace(/\p{Emoji}/gu, '').replace(/\[emotion:\w+\]/gi, '').trim();
-  
   if (!clean) return;
+  
   const utt = new SpeechSynthesisUtterance(clean);
-  utt.rate = 1.05; utt.pitch = 1.15; utt.volume = 1;
+  
+  // Apply Dynamic Voice Profile based on Theme
+  const theme = localStorage.getItem('petro_theme') || 'default';
+  let pitch = 1.0, rate = 1.05;
+  
+  if (theme === 'terminator') {
+      pitch = 0.4; rate = 0.9;
+  } else if (theme === 'transformer') {
+      pitch = 0.1; rate = 0.85; // Extremely deep and robotic
+  } else if (theme === 'monkey') {
+      pitch = 1.5; rate = 1.25; // Squeaky and fast
+  } else if (theme === 'dog') {
+      pitch = 1.3; rate = 1.15; // Higher pitched, playful
+  } else if (theme === 'starwars') {
+      pitch = 1.8; rate = 1.4; // Very fast, high pitch chatter
+  }
+  
+  utt.pitch = pitch;
+  utt.rate = rate;
+  utt.volume = 1;
+  
   const voices = synth.getVoices();
   const pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0];
   if (pref) utt.voice = pref;
+  
   utt.onstart = () => { ttsActive = true;  updateTTSBtn(); animateMouth(true);  };
   utt.onend   = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); };
   utt.onerror = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); };
@@ -681,7 +714,6 @@ function initEyes() {
   scheduleEyeMove();
 }
 
-// Smoothes the transition to the target eye offset
 function runEyeLoop() {
   (function loop() {
     const s = 0.12;
@@ -697,11 +729,9 @@ function runEyeLoop() {
   })();
 }
 
-// Automatically randomly look around instead of following a cursor
 function scheduleEyeMove() {
   if (!isSleeping) {
     if (Math.random() > 0.4) {
-      // Look at a random spot within a 12px radius
       const angle = Math.random() * Math.PI * 2;
       const radius = Math.random() * 12; 
       eyeTgt.lx = Math.cos(angle) * radius;
@@ -709,7 +739,6 @@ function scheduleEyeMove() {
       eyeTgt.rx = eyeTgt.lx;
       eyeTgt.ry = eyeTgt.ly;
     } else {
-      // Return eyes to center
       eyeTgt.lx = 0; eyeTgt.ly = 0;
       eyeTgt.rx = 0; eyeTgt.ry = 0;
     }
@@ -717,7 +746,6 @@ function scheduleEyeMove() {
     eyeTgt.lx = 0; eyeTgt.ly = 0; 
     eyeTgt.rx = 0; eyeTgt.ry = 0;
   }
-  // Schedule next move in 1 to 3.5 seconds
   setTimeout(scheduleEyeMove, 1000 + Math.random() * 2500);
 }
 
@@ -759,7 +787,6 @@ function setEmotion(name, force = false) {
   const em = emotions[name] || emotions.neutral;
   currentEmotion = name;
 
-  // Auto-reset emotion to neutral after 5 seconds
   clearTimeout(emotionResetTimer);
   if (name !== 'neutral' && name !== 'sleeping') {
       emotionResetTimer = setTimeout(() => setEmotion('neutral'), 5000);
@@ -768,7 +795,7 @@ function setEmotion(name, force = false) {
   for (const s of ['l','r']) {
     eyeEls[`${s}Iris`].setAttribute('rx', em.irisR);   eyeEls[`${s}Iris`].setAttribute('ry', em.irisR);
     eyeEls[`${s}Pupil`].setAttribute('rx', em.pupilR); eyeEls[`${s}Pupil`].setAttribute('ry', em.pupilR);
-    eyeEls[`${s}Iris`].style.fill = (name==='neutral') ? 'url(#ig1)' : em.color; // Map theme color safely
+    eyeEls[`${s}Iris`].style.fill = (name==='neutral') ? 'url(#ig1)' : em.color; 
     eyeEls[`${s}LidTop`].setAttribute('y', em.lidTopY);
     eyeEls[`${s}LidBot`].setAttribute('y', em.lidBotY);
     eyeEls[`${s}Rim`].setAttribute('stroke', em.color);
