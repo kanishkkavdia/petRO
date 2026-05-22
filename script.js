@@ -423,7 +423,10 @@ const TOOL_DECLARATIONS = [
   { name:'wander',        description:'Wander randomly', parameters:{type:'OBJECT',properties:{}} },
   { name:'capture_photo', description:'Snap photo', parameters:{type:'OBJECT',properties:{}} },
   { name:'search_youtube',description:'Search YouTube and play in app', parameters:{type:'OBJECT',properties:{query:{type:'STRING',description:'Query'}},required:['query']} },
-  { name:'call_contact',  description:'Initiate a phone call to a specified number.', parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING', description: 'The phone number to call'} }, required:['phone_number']} }
+  { name:'call_contact',  description:'Initiate a phone call to a specified number.', parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING', description: 'The phone number to call'} }, required:['phone_number']} },
+  { name:'eat_popcorn', description:'PetRO eats popcorn.', parameters:{type:'OBJECT',properties:{}} },
+  { name:'exercise',    description:'PetRO exercises (doing pushups or jumping).', parameters:{type:'OBJECT',properties:{}} }
+
 ];
 
 async function callGemini(userText, imageDataUrl = null) {
