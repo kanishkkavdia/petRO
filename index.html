@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#090d18">
+<link rel="manifest" href="manifest.json">
 <title>petRO</title>
 <link rel="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/robot/default/48px.svg">
 <style>
@@ -197,6 +198,15 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 
 /* ── MEMORY INDICATOR ── */
 #memoryPill { font-size:0.6rem; color:var(--muted); text-align:center; padding:2px 8px; opacity:0.6; }
+
+/* ── YOUTUBE IFRAME OVERLAY ── */
+#ytContainer {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  background: var(--surface); z-index: 150; display: none; flex-direction: column;
+}
+#ytHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: var(--card); border-bottom: 1px solid var(--border); }
+#ytFrame { flex: 1; border: none; width: 100%; }
+.close-yt-btn { background: var(--red); color: white; border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -204,8 +214,9 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 <div id="topbar">
   <div class="logo">pet<span>RO</span></div>
   <div class="topbar-right">
-    <div class="badge mic-off"    id="micBadge"  onclick="toggleAlwaysOnMic()" title="Toggle wake word mic">🎤 OFF</div>
-    <div class="badge key-missing" id="keyBadge" onclick="openSettings()"      title="Gemini API key">🔑 KEY</div>
+    <div class="badge"            id="fsBtn"     onclick="toggleFullscreen()"   title="Toggle Fullscreen">⛶ FS</div>
+    <div class="badge mic-off"    id="micBadge"  onclick="toggleAlwaysOnMic()"  title="Toggle wake word mic">🎤 OFF</div>
+    <div class="badge key-missing" id="keyBadge" onclick="openSettings()"       title="Gemini API key">🔑 KEY</div>
     <div class="badge ble-off"    id="bleBtn"    onclick="toggleBLE()"          title="Connect to petRO BLE">⚫ BLE</div>
     <div class="badge"            id="settingsBtn" onclick="openSettings()"     style="color:var(--muted)">⚙</div>
   </div>
@@ -269,7 +280,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
             <path d="M 135 125 Q 150 120 165 125 L 155 140 Q 150 145 145 140 Z" fill="#1a1a1a" />
             <circle cx="146" cy="128" r="3" fill="#ffffff" opacity="0.4"/>
           </g>
-
           <g id="theme-monkey" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;">
             <circle cx="10" cy="100" r="32" fill="#5d4037" />
             <circle cx="15" cy="100" r="18" fill="#a1887f" />
@@ -277,7 +287,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
             <circle cx="285" cy="100" r="18" fill="#a1887f" />
             <path d="M 130 18 Q 150 -15 170 18 Q 160 25 150 25 Q 140 25 130 18 Z" fill="#5d4037" />
           </g>
-
           <g id="theme-terminator" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;">
             <path d="M 10 80 L 30 40 L 70 20 L 60 90 Z" fill="#333" stroke="#111" stroke-width="2" opacity="0.9"/>
             <line x1="30" y1="40" x2="10" y2="100" stroke="#111" stroke-width="3" />
@@ -289,7 +298,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
             <line x1="167" y1="88" x2="197" y2="88" stroke="#ff0000" stroke-width="2" opacity="0.7"/>
             <line x1="273" y1="88" x2="303" y2="88" stroke="#ff0000" stroke-width="2" opacity="0.7"/>
           </g>
-
           <g id="theme-starwars" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;">
             <path d="M 30 25 Q 150 -15 270 25 L 260 40 Q 150 5 40 40 Z" fill="#0055ff" />
             <rect x="130" y="5" width="40" height="15" fill="#e0e0e0" />
@@ -300,7 +308,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
             <line x1="15" y1="120" x2="35" y2="120" stroke="#111" stroke-width="2"/>
             <line x1="265" y1="120" x2="285" y2="120" stroke="#111" stroke-width="2"/>
           </g>
-
           <g id="theme-transformer" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;">
             <polygon points="140,5 160,5 160,40 150,60 140,40" fill="#e0e0e0" stroke="#888" stroke-width="2" />
             <polygon points="145,15 155,15 155,35 150,45 145,35" fill="#0044cc" />
@@ -359,6 +366,15 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   </div>
 
   <div id="chatSection">
+    
+    <div id="ytContainer">
+      <div id="ytHeader">
+        <span style="font-weight: bold; font-size: 0.8rem;">petRO Media Player</span>
+        <button class="close-yt-btn" onclick="closeYouTube()">Close</button>
+      </div>
+      <iframe id="ytFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
+
     <div class="section-label" style="padding-top:14px;">💬 Chat with petRO</div>
     <div id="messages">
       <div class="msg bot">
@@ -369,7 +385,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div class="sugs">
       <button class="sug" style="color:var(--theme-color);border-color:var(--theme-glow);" onclick="manualCapture()">📸 Snap</button>
       <button class="sug" onclick="sendSug('Walk forward for 3 seconds then nod 2 times')">🏃 Combo Move</button>
-      <button class="sug" onclick="sendSug('Dance!')">💃 Dance</button>
+      <button class="sug" onclick="sendSug('Call mom')">📞 Call</button>
       <button class="sug" onclick="sendSug('Play lofi hip hop on youtube')">🎵 Lofi</button>
       <button class="sug" onclick="sendSug('What can you do?')">🤔 Help</button>
     </div>
