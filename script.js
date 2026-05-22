@@ -8,6 +8,9 @@ const SLEEP_MS    = 5 * 60 * 1000;
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
+// The YouTube Data API Key you provided
+const YT_API_KEY = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
+
 const BLE_SERVICE  = '00001234-0000-1000-8000-00805f9b34fb';
 const BLE_CMD_CHAR = '00005678-0000-1000-8000-00805f9b34fb';
 const BLE_HB_CHAR  = '00005679-0000-1000-8000-00805f9b34fb';
@@ -88,6 +91,30 @@ let mouthTalkAnim = null;
 let toastTimer = null;
 let chatHistory = [];
 let motionEnabled = false;
+
+// ════════════════════════════════════════════════════════
+// FULLSCREEN LOGIC
+// ════════════════════════════════════════════════════════
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    try {
+      await document.documentElement.requestFullscreen();
+      // Try to lock to landscape if the device supports it
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported'));
+      }
+    } catch(e) {
+      toast('⚠️ Fullscreen not supported on this browser');
+    }
+  } else {
+    try {
+      await document.exitFullscreen();
+      if (screen.orientation && screen.orientation.unlock) {
+        screen.orientation.unlock();
+      }
+    } catch(e) {}
+  }
+}
 
 // ════════════════════════════════════════════════════════
 // API KEY & PERSONALIZATION
@@ -369,13 +396,15 @@ AVAILABLE FUNCTIONS:
   nod_head(times)                 → nod head N times
   wander()                        → random exploration
   capture_photo()                 → snap picture
-  search_youtube(query)           → search YouTube in a new tab
+  search_youtube(query)           → search YouTube
+  call_contact(phone_number)      → open dialer to call number (ask for number if unknown)
 
 WHEN TO CALL:
   "walk straight for 5 seconds then move left" → [move_forward(5), turn_left(1)]
   "nod 5 times"                                → [nod_head(5)]
   "take a photo"                               → [capture_photo()]
   "search youtube for..."                      → [search_youtube(query)]
+  "Call mom at 555-1234"                       → [call_contact("555-1234")]
   General chat                                 → just respond!
 
 VISION: Always describe image contents enthusiastically if user attaches one.
@@ -393,7 +422,8 @@ const TOOL_DECLARATIONS = [
   { name:'nod_head',      description:'Nod servo head N times', parameters:{type:'OBJECT',properties:{ times: {type: 'INTEGER', description: 'Number of times to nod (default 1)'} }} },
   { name:'wander',        description:'Wander randomly', parameters:{type:'OBJECT',properties:{}} },
   { name:'capture_photo', description:'Snap photo', parameters:{type:'OBJECT',properties:{}} },
-  { name:'search_youtube',description:'Search YouTube in a new tab', parameters:{type:'OBJECT',properties:{query:{type:'STRING',description:'Query'}},required:['query']} }
+  { name:'search_youtube',description:'Search YouTube and play in app', parameters:{type:'OBJECT',properties:{query:{type:'STRING',description:'Query'}},required:['query']} },
+  { name:'call_contact',  description:'Initiate a phone call to a specified number.', parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING', description: 'The phone number to call'} }, required:['phone_number']} }
 ];
 
 async function callGemini(userText, imageDataUrl = null) {
@@ -456,6 +486,38 @@ function detectEmotion(toolCalls, reply) {
 }
 
 // ════════════════════════════════════════════════════════
+// YOUTUBE IFRAME OVERLAY (Restored and Automated via API)
+// ════════════════════════════════════════════════════════
+async function openYouTube(query) {
+  toast(`🔍 Searching YouTube for "${query}"...`);
+  try {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q=${encodeURIComponent(query)}&type=video&key=${YT_API_KEY}`);
+    const data = await res.json();
+    
+    if (data.items && data.items.length > 0) {
+      const vid = data.items[0].id.videoId;
+      const ytContainer = document.getElementById('ytContainer');
+      const ytFrame = document.getElementById('ytFrame');
+      
+      // Inject the precise video ID so YouTube allows it to embed
+      ytFrame.src = `https://www.youtube.com/embed/${vid}?autoplay=1`;
+      ytContainer.style.display = 'flex';
+      toast('✅ Playing Video!');
+    } else {
+      toast('❌ No video found for that search.');
+    }
+  } catch (error) {
+    toast('❌ YouTube search failed.');
+    console.error(error);
+  }
+}
+
+function closeYouTube() {
+  document.getElementById('ytContainer').style.display = 'none';
+  document.getElementById('ytFrame').src = '';
+}
+
+// ════════════════════════════════════════════════════════
 // TOOL EXECUTION (Now supports looping & timed commands)
 // ════════════════════════════════════════════════════════
 async function executeTools(toolCalls) {
@@ -502,9 +564,13 @@ async function executeTools(toolCalls) {
         break;
       case 'search_youtube':
         if (args.query) { 
-          toast('🔍 Opening YouTube safely...'); 
-          // Open YouTube in an external tab to bypass security blocks
-          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(args.query)}`, '_blank'); 
+          await openYouTube(args.query);
+        }
+        break;
+      case 'call_contact':
+        if (args.phone_number) {
+          toast(`📞 Opening dialer for ${args.phone_number}...`);
+          window.location.href = `tel:${args.phone_number}`;
         }
         break;
     }
