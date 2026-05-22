@@ -336,6 +336,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
           <ellipse id="tearL" cx="52"  cy="128" rx="4" ry="6" fill="#7dd3ff" opacity="0.8"/>
           <ellipse id="tearR" cx="248" cy="128" rx="4" ry="6" fill="#7dd3ff" opacity="0.8"/>
         </g>
+        <g id="animation-overlays" style="pointer-events: none;">
+          <g id="anim-popcorn" opacity="0">
+            <path d="M 110 130 L 190 130 L 180 180 L 120 180 Z" fill="#ff5f6d" />
+            <circle cx="130" cy="115" r="8" fill="#ffd23f" />
+            <circle cx="150" cy="110" r="10" fill="#ffd23f" />
+            <circle cx="170" cy="115" r="7" fill="#ffd23f" />
+          </g>
+          
+          <path id="anim-sweat" d="M 280 40 Q 285 55 280 60 Q 275 55 280 40 Z" fill="#3b9eff" opacity="0" />
+        </g>
       </svg>
     </div>
   </div>
