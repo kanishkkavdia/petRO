@@ -346,8 +346,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 </div>
 
 <div id="controlsScreen">
-  <div id="dpadSection">
+ <div id="dpadSection">
     <div class="section-label">🕹 Direct Controls</div>
+    
+    <!-- NEW: Head Controls -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-bottom:12px;">
+      <button class="act" onpointerdown="startDirectMove('A')" onpointerup="startDirectMove('E')" onpointerleave="startDirectMove('E')">👁️ Left</button>
+      <button class="act" onpointerdown="startDirectMove('T')" onpointerup="startDirectMove('U')" onpointerleave="startDirectMove('U')">⬆️ Up</button>
+      <button class="act" onpointerdown="startDirectMove('C')" onpointerup="startDirectMove('E')" onpointerleave="startDirectMove('E')">👁️ Right</button>
+    </div>
+
     <div class="dpad">
       <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▲</button>
       <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">◀</button>
