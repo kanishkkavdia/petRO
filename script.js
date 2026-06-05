@@ -8,6 +8,7 @@ const SLEEP_MS    = 5 * 60 * 1000;
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
+// The YouTube Data API Key you provided
 const YT_API_KEY = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
 
 const BLE_SERVICE  = '00001234-0000-1000-8000-00805f9b34fb';
@@ -15,36 +16,110 @@ const BLE_CMD_CHAR = '00005678-0000-1000-8000-00805f9b34fb';
 const BLE_HB_CHAR  = '00005679-0000-1000-8000-00805f9b34fb';
 const BLE_NAME     = 'petRO';
 
+const DANCE_STEPS = [
+  ['L',550],['S',100],['R',550],['S',100],
+  ['F',350],['S',80], ['B',350],['S',80],
+  ['L',450],['S',80], ['R',450],['S',80],
+  ['F',250],['S',50], ['B',250],['S',50],
+  ['L',250],['S',30], ['R',250],['S',30],
+  ['L',250],['S',30], ['R',250],['S',30],
+  ['N',2000],['S',0]
+];
+
+// Theme configurations
 const THEMES = {
-  default: { color: '#3b9eff', bg: '#090d18', surface: '#101623', card: '#141e30', prompt: "You are petRO, a cute and playful robot. Be playful, warm, and fun. Keep replies SHORT." },
-  dog: { color: '#ff9800', bg: '#1a1005', surface: '#2b1b0a', card: '#3d2610', prompt: "You are an energetic and loyal robot dog. Bark playfully in text. Keep replies SHORT." },
-  terminator: { color: '#ff3333', bg: '#0a0000', surface: '#1a0000', card: '#2a0505', prompt: "You are a calculating cyborg T-800. Speak concisely. Keep replies SHORT." },
-  monkey: { color: '#8bc34a', bg: '#0a1205', surface: '#13240a', card: '#1c360e', prompt: "You are a cheeky, energetic robot monkey. Make monkey sounds. Keep replies SHORT." },
-  starwars: { color: '#00e5ff', bg: '#000814', surface: '#00122e', card: '#001c47', prompt: "You are a helpful astromech droid. Make beep-boop sounds. Keep replies SHORT." },
-  transformer: { color: '#f44336', bg: '#0d1017', surface: '#181d29', card: '#222a3b', prompt: "You are Optimus Prime, a noble Autobot leader. Speak with deep authority. Keep replies SHORT." }
+  default: {
+    color: '#3b9eff',
+    bg: '#090d18',
+    surface: '#101623',
+    card: '#141e30',
+    prompt: "You are petRO, a cute and playful robot with wheels and a servo head. Be playful, warm, and fun. Keep replies SHORT."
+  },
+  dog: {
+    color: '#ff9800',
+    bg: '#1a1005',
+    surface: '#2b1b0a',
+    card: '#3d2610',
+    prompt: "You are an energetic and loyal robot dog. Bark playfully in text (e.g. 'Woof!'). Act like a happy puppy. Keep replies SHORT."
+  },
+  terminator: {
+    color: '#ff3333',
+    bg: '#0a0000',
+    surface: '#1a0000',
+    card: '#2a0505',
+    prompt: "You are a calculating cyborg T-800. Speak concisely. Use robotic/movie references like 'Affirmative' or 'I will be back'. Keep replies SHORT."
+  },
+  monkey: {
+    color: '#8bc34a',
+    bg: '#0a1205',
+    surface: '#13240a',
+    card: '#1c360e',
+    prompt: "You are a cheeky, energetic robot monkey. Make occasional monkey sounds in text (e.g., 'Ooh ooh!'). Be mischievous. Keep replies SHORT."
+  },
+  starwars: {
+    color: '#00e5ff',
+    bg: '#000814',
+    surface: '#00122e',
+    card: '#001c47',
+    prompt: "You are a helpful astromech droid. Make beep-boop sounds in text. You are loyal and courageous. Keep replies SHORT."
+  },
+  transformer: {
+    color: '#f44336',
+    bg: '#0d1017',
+    surface: '#181d29',
+    card: '#222a3b',
+    prompt: "You are Optimus Prime, a noble Autobot leader. Speak with deep authority, heroism, and respect. Keep replies SHORT."
+  }
 };
 
 // ════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════
-let bleDevice = null, bleCmdChar = null, bleConnected = false, isBusy = false;
-let currentEmotion = 'neutral', emotionResetTimer = null, isSleeping = false;
-let micState = 'off', alwaysOnMic = false, bgRecog = null, cmdRecog = null;
+let bleDevice    = null;
+let bleCmdChar   = null;
+let bleConnected = false;
+let isBusy       = false;
+let currentEmotion = 'neutral';
+let emotionResetTimer = null; 
+let isSleeping   = false;
+let micState = 'off', alwaysOnMic = false;
+let bgRecog = null, cmdRecog = null;
 let inactTimer = null, fidgetTimer = null, zzzAnim = null, blinkTimer = null;
 let videoStream = null, currentUploadedImage = null;
-let ttsActive = false, mouthTalkAnim = null, toastTimer = null;
-let chatHistory = [], motionEnabled = false;
+let ttsActive = false;
+let mouthTalkAnim = null;
+let toastTimer = null;
+let chatHistory = [];
+let motionEnabled = false;
 
-// ... (Fullscreen, Personalization, BLE Setup logic remains unchanged) ...
-async function toggleFullscreen() { if (!document.fullscreenElement) { try { await document.documentElement.requestFullscreen(); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); } catch(e) { toast('⚠️ Fullscreen not supported on this browser'); } } else { try { await document.exitFullscreen(); if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e) {} } }
+// ... (Fullscreen, API Key, Personalization, BLE Setup logic remains unchanged) ...
+
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    try { await document.documentElement.requestFullscreen(); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); } catch(e) { toast('⚠️ Fullscreen not supported on this browser'); }
+  } else { try { await document.exitFullscreen(); if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e) {} }
+}
+
 function getApiKey() { return localStorage.getItem('petro_gemini_key') || ''; }
 function saveApiKey() { const v = document.getElementById('apiKeyInput').value.trim(); if (!v) { toast('⚠️ Please paste a key first'); return; } localStorage.setItem('petro_gemini_key', v); updateKeyBadge(); toast('✅ Key saved!'); closeSettings(); }
 function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.getElementById('apiKeyInput').value = ''; updateKeyBadge(); toast('🗑 Key removed'); }
 function updateKeyBadge() { const k = getApiKey(); const badge = document.getElementById('keyBadge'); const status = document.getElementById('keyStatus'); if (k) { badge.className = 'badge key-set'; badge.textContent = '🔑 KEY ✓'; status.className = 'key-status ok'; status.textContent = `Key saved: ${k.slice(0,8)}…`; } else { badge.className = 'badge key-missing'; badge.textContent = '🔑 KEY'; status.className = 'key-status bad'; status.textContent = 'No key saved'; } }
 function toggleKeyVisibility() { const inp = document.getElementById('apiKeyInput'); const btn = document.getElementById('eyeBtn'); if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; } else { inp.type = 'password'; btn.textContent = '👁'; } }
+
 function loadPersonalization() { const name = localStorage.getItem('petro_user_name') || ''; const theme = localStorage.getItem('petro_theme') || 'default'; document.getElementById('userNameInput').value = name; document.getElementById('themeSelect').value = theme; applyTheme(); }
 function savePersonalization() { const name = document.getElementById('userNameInput').value.trim(); const theme = document.getElementById('themeSelect').value; localStorage.setItem('petro_user_name', name); localStorage.setItem('petro_theme', theme); applyTheme(); toast('✅ Identity & Theme Saved!'); }
-function applyTheme() { const tId = document.getElementById('themeSelect').value || 'default'; const t = THEMES[tId]; const root = document.documentElement; root.style.setProperty('--theme-color', t.color); root.style.setProperty('--bg', t.bg); root.style.setProperty('--surface', t.surface); root.style.setProperty('--card', t.card); document.getElementById('stop1-2').setAttribute('stop-color', t.color); document.getElementById('stop2-2').setAttribute('stop-color', t.color); document.getElementById('lGlow').setAttribute('stroke', t.color); document.getElementById('rGlow').setAttribute('stroke', t.color); const addons = ['dog', 'terminator', 'monkey', 'starwars', 'transformer']; addons.forEach(addon => { const el = document.getElementById('theme-' + addon); if (el) el.style.opacity = (tId === addon) ? '1' : '0'; }); const mouthGroup = document.getElementById('mouthGroup'); const mouthRim = document.getElementById('mouthRim'); if (tId === 'transformer') { mouthGroup.style.opacity = '0'; mouthRim.style.opacity = '0'; } else { mouthGroup.style.opacity = '1'; mouthRim.style.opacity = '1'; } if (currentEmotion === 'neutral') setEmotion('neutral', true); }
+
+function applyTheme() {
+  const tId = document.getElementById('themeSelect').value || 'default'; const t = THEMES[tId]; const root = document.documentElement;
+  root.style.setProperty('--theme-color', t.color); root.style.setProperty('--bg', t.bg); root.style.setProperty('--surface', t.surface); root.style.setProperty('--card', t.card);
+  document.getElementById('stop1-2').setAttribute('stop-color', t.color); document.getElementById('stop2-2').setAttribute('stop-color', t.color); document.getElementById('lGlow').setAttribute('stroke', t.color); document.getElementById('rGlow').setAttribute('stroke', t.color);
+  const addons = ['dog', 'terminator', 'monkey', 'starwars', 'transformer'];
+  addons.forEach(addon => { const el = document.getElementById('theme-' + addon); if (el) el.style.opacity = (tId === addon) ? '1' : '0'; });
+  const mouthGroup = document.getElementById('mouthGroup'); const mouthRim = document.getElementById('mouthRim');
+  if (tId === 'transformer') { mouthGroup.style.opacity = '0'; mouthRim.style.opacity = '0'; } else { mouthGroup.style.opacity = '1'; mouthRim.style.opacity = '1'; }
+  if (currentEmotion === 'neutral') setEmotion('neutral', true);
+}
+
 function openSettings() { const k = getApiKey(); if (k) document.getElementById('apiKeyInput').value = k; document.getElementById('settingsModal').classList.add('open'); updateKeyBadge(); updateBleInfoBox(); updateMemoryPill(); }
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
@@ -63,12 +138,17 @@ function disconnectBLE() { try { bleDevice?.gatt?.disconnect(); } catch {} bleDe
 function onBleDisconnect() { if (!bleConnected) return; setBLE(false); toast('⚠️ petRO disconnected.'); bleCmdChar = null; updateBleInfoBox(); }
 function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
 function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; if (bleConnected && bleDevice) el.innerHTML = `Status: <span style="color:var(--green)">Connected ✓</span>`; else el.innerHTML = `Status: <span style="color:var(--red)">Not connected</span>`; }
-async function bleSend(cmd) { if (!bleCmdChar) return; if (!bleDevice?.gatt?.connected) { try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); } catch(e) { setBLE(false); return; } } try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; } }
+
+async function bleSend(cmd) {
+  if (!bleCmdChar) return;
+  if (!bleDevice?.gatt?.connected) { try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); } catch(e) { setBLE(false); return; } }
+  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; }
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ════════════════════════════════════════════════════════
-// DIRECT MOVE & ANIMATIONS
+// DIRECT MOVE
 // ════════════════════════════════════════════════════════
 let isMoving = false;
 async function startDirectMove(cmd) { if (!bleConnected) { toast('⚠️ Connect BLE first!'); return; } resetInactivity(); isMoving = true; await bleSend(cmd); }
@@ -84,64 +164,11 @@ async function doAction(action) {
   }
 }
 
-// UPDATED: Incorporates left/right neck movement and spin
-async function doDance() { 
-  toast('💃 Dancing!'); setEmotion('excited'); 
-  const moves = [
-    ['A',400], ['L',500], ['S',100],  // Look left, spin left
-    ['C',400], ['R',500], ['S',100],  // Look right, spin right
-    ['E',100], ['F',350], ['B',350],  // Look center, forward/back
-    ['N',1500],['K',2000]             // Nod, then Neck Dance
-  ];
-  for (const [cmd, ms] of moves) { await bleSend(cmd); if (ms > 0) await sleep(ms); } 
-  await bleSend('S'); await bleSend('E'); toast('🎉 Done!'); 
-}
-
-// UPDATED: Looks around before deciding where to move
-async function doWander() { 
-  toast('🗺 Wandering!'); setEmotion('focused'); 
-  const moves = ['F','B','L','R']; 
-  for (let i = 0; i < 5; i++) { 
-    await bleSend(Math.random() > 0.5 ? 'A' : 'C'); await sleep(400); // Look around
-    await bleSend('E'); await sleep(100);                             // Face front
-    const c = moves[Math.floor(Math.random() * moves.length)]; 
-    const d = 300 + Math.random() * 500; 
-    await bleSend(c); await sleep(d); await bleSend('S'); await sleep(150); 
-  } 
-  await bleSend('S'); toast('✅ Done'); 
-}
+async function doDance() { toast('💃 Dancing!'); setEmotion('excited'); for (const [cmd, ms] of DANCE_STEPS) { await bleSend(cmd); if (ms > 0) await sleep(ms); } toast('🎉 Done!'); }
+async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); const moves = ['F','B','L','R']; for (let i = 0; i < 6; i++) { const c = moves[Math.floor(Math.random() * moves.length)]; const d = 300 + Math.random() * 500; await bleSend(c); await sleep(d); await bleSend('S'); await sleep(100); } await bleSend('S'); toast('✅ Done'); }
 
 // ════════════════════════════════════════════════════════
-// CONTEXTUAL OVERLAY (Eating, Studying, Working, Gym)
-// ════════════════════════════════════════════════════════
-function showActivityOverlay(activity) {
-  const icons = { eating: '🍔', working: '💻', studying: '📚', working_out: '🏋️' };
-  const icon = icons[activity] || '✨';
-  
-  const el = document.createElement('div');
-  el.textContent = icon;
-  el.style.cssText = 'position:absolute; top:30%; left:50%; transform:translateX(-50%); font-size:6rem; z-index:500; animation: bouncePop 3.5s ease forwards; text-shadow: 0 4px 15px rgba(0,0,0,0.4); pointer-events:none;';
-  document.getElementById('faceScreen').appendChild(el);
-  
-  if (!document.getElementById('activityStyle')) {
-    const style = document.createElement('style');
-    style.id = 'activityStyle';
-    style.textContent = `@keyframes bouncePop { 0% { opacity:0; transform: translate(-50%, 20px) scale(0.5); } 15% { opacity:1; transform: translate(-50%, -20px) scale(1.2); } 25% { transform: translate(-50%, 0px) scale(1); } 80% { opacity:1; transform: translate(-50%, 0px) scale(1); } 100% { opacity:0; transform: translate(-50%, -30px) scale(0.8); } }`;
-    document.head.appendChild(style);
-  }
-  
-  setTimeout(() => el.remove(), 3500);
-  
-  // Physical Reaction parallel to animation
-  if (bleConnected) {
-    if (activity === 'eating') { setEmotion('happy'); bleSend('H'); } // Happy dance
-    else if (activity === 'studying' || activity === 'working') { setEmotion('focused'); bleSend('V'); } // Tilt head to focus
-    else if (activity === 'working_out') { setEmotion('excited'); bleSend('6'); } // Shake head to hype up
-  }
-}
-
-// ════════════════════════════════════════════════════════
-// GYROSCOPE
+// GYROSCOPE / ACCELEROMETER
 // ════════════════════════════════════════════════════════
 function enableMotionSensors() { if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') { DeviceOrientationEvent.requestPermission().then(response => { if (response == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error); } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } }
 let lastAccel = 0;
@@ -160,41 +187,48 @@ function buildSystemPrompt() {
   
   p += `
 AVAILABLE FUNCTIONS:
-  move_forward, move_backward, turn_left, turn_right, stop_robot
-  dance(), nod_head(), wander(), capture_photo(), search_youtube(), call_contact()
+  move_forward(duration_seconds)  → drive forward for N seconds
+  move_backward(duration_seconds) → reverse for N seconds
+  turn_left(duration_seconds)     → spin left for N seconds
+  turn_right(duration_seconds)    → spin right for N seconds
+  stop_robot()                    → stop movement
+  dance()                         → dance routine
+  nod_head(times)                 → nod head N times
+  wander()                        → random exploration
+  capture_photo()                 → snap picture
+  search_youtube(query)           → search YouTube
+  call_contact(phone_number)      → open dialer to call number
   perform_action(action)          → execute character animations: 'happy', 'scared', 'shake', 'neck_dance', 'spin', 'reverse_nod'
   draw_shape(shape)               → move in a physical shape: 'circle', 'rectangle'
   dance_style(style)              → specific dances: 'michael_jackson'
-  react_to_activity(activity)     → USE THIS if user mentions or sends a picture of them eating, studying, working, or working out to spawn 3D objects on screen!
 
 WHEN TO CALL:
-  "i am eating a burger"                       → [react_to_activity("eating")]
-  "doing my homework"                          → [react_to_activity("studying")]
   "dance like michael jackson"                 → [dance_style("michael_jackson")]
   "make a circle shape"                        → [draw_shape("circle")]
-  "look left then move forward"                → [perform_action("look_left"), move_forward(2)]
+  "act scared" or "shake your head"            → [perform_action("scared")] / [perform_action("shake")]
+  "walk straight for 5 seconds then move left" → [move_forward(5), turn_left(1)]
+  General chat                                 → just respond!
 
-VISION: Always describe image contents enthusiastically if user attaches one. IF the image shows them working, eating, etc, call react_to_activity!
+VISION: Always describe image contents enthusiastically if user attaches one.
 EMOTION HINTS: append ONE tag: [emotion:neutral], [emotion:happy], [emotion:excited], [emotion:sad], [emotion:angry], [emotion:focused]`;
   return p;
 }
 
 const TOOL_DECLARATIONS = [
-  { name:'move_forward',  parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER'} }} },
-  { name:'move_backward', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER'} }} },
-  { name:'turn_left',     parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER'} }} },
-  { name:'turn_right',    parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER'} }} },
-  { name:'stop_robot',    parameters:{type:'OBJECT',properties:{}} },
-  { name:'dance',         parameters:{type:'OBJECT',properties:{}} },
-  { name:'nod_head',      parameters:{type:'OBJECT',properties:{ times: {type: 'INTEGER'} }} },
-  { name:'wander',        parameters:{type:'OBJECT',properties:{}} },
-  { name:'capture_photo', parameters:{type:'OBJECT',properties:{}} },
-  { name:'search_youtube',parameters:{type:'OBJECT',properties:{query:{type:'STRING'}},required:['query']} },
-  { name:'call_contact',  parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING'} }, required:['phone_number']} },
-  { name:'perform_action', parameters:{type:'OBJECT',properties:{ action: {type: 'STRING', enum:['happy','scared','shake','neck_dance','spin','reverse_nod', 'look_left', 'look_right']} }, required:['action']} },
-  { name:'draw_shape',    parameters:{type:'OBJECT',properties:{ shape: {type: 'STRING', enum:['circle','rectangle']} }, required:['shape']} },
-  { name:'dance_style',   parameters:{type:'OBJECT',properties:{ style: {type: 'STRING', enum:['michael_jackson']} }, required:['style']} },
-  { name:'react_to_activity', parameters:{type:'OBJECT',properties:{ activity: {type: 'STRING', enum:['eating','working','studying','working_out']} }, required:['activity']} }
+  { name:'move_forward',  description:'Drive forward for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 1)'} }} },
+  { name:'move_backward', description:'Reverse for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 1)'} }} },
+  { name:'turn_left',     description:'Spin left for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 0.5)'} }} },
+  { name:'turn_right',    description:'Spin right for the specified duration.', parameters:{type:'OBJECT',properties:{ duration_seconds: {type: 'NUMBER', description: 'Seconds to move (default 0.5)'} }} },
+  { name:'stop_robot',    description:'Stop immediately', parameters:{type:'OBJECT',properties:{}} },
+  { name:'dance',         description:'Dance routine', parameters:{type:'OBJECT',properties:{}} },
+  { name:'nod_head',      description:'Nod servo head N times', parameters:{type:'OBJECT',properties:{ times: {type: 'INTEGER', description: 'Number of times to nod (default 1)'} }} },
+  { name:'wander',        description:'Wander randomly', parameters:{type:'OBJECT',properties:{}} },
+  { name:'capture_photo', description:'Snap photo', parameters:{type:'OBJECT',properties:{}} },
+  { name:'search_youtube',description:'Search YouTube and play in app', parameters:{type:'OBJECT',properties:{query:{type:'STRING',description:'Query'}},required:['query']} },
+  { name:'call_contact',  description:'Initiate a phone call to a specified number.', parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING', description: 'The phone number to call'} }, required:['phone_number']} },
+  { name:'perform_action', description:'Perform a character specific action.', parameters:{type:'OBJECT',properties:{ action: {type: 'STRING', enum:['happy','scared','shake','neck_dance','spin','reverse_nod']} }, required:['action']} },
+  { name:'draw_shape',    description:'Move in a geometric shape.', parameters:{type:'OBJECT',properties:{ shape: {type: 'STRING', enum:['circle','rectangle']} }, required:['shape']} },
+  { name:'dance_style',   description:'Perform a specific requested dance style.', parameters:{type:'OBJECT',properties:{ style: {type: 'STRING', enum:['michael_jackson']} }, required:['style']} }
 ];
 
 async function callGemini(userText, imageDataUrl = null) {
@@ -243,7 +277,7 @@ async function callGemini(userText, imageDataUrl = null) {
   return { reply: replyText, emotion, toolCalls };
 }
 
-const EMOTION_MAP = { dance:'excited', nod_head:'happy', wander:'focused', react_to_activity:'excited', perform_action:'excited', dance_style:'excited' };
+const EMOTION_MAP = { dance:'excited', nod_head:'happy', wander:'focused', move_forward:'focused', move_backward:'focused', turn_left:'focused', turn_right:'focused', stop_robot:'neutral', capture_photo:'excited', search_youtube:'focused', perform_action:'excited', dance_style:'excited' };
 function detectEmotion(toolCalls, reply) {
   for (const tc of toolCalls) { if (EMOTION_MAP[tc.name]) return EMOTION_MAP[tc.name]; }
   const l = reply.toLowerCase();
@@ -255,49 +289,87 @@ function detectEmotion(toolCalls, reply) {
 }
 
 // ════════════════════════════════════════════════════════
-// YOUTUBE & TOOL EXECUTION
+// YOUTUBE IFRAME OVERLAY (Fixed Embeddable Filter)
 // ════════════════════════════════════════════════════════
 async function openYouTube(query) {
   toast(`🔍 Searching YouTube for "${query}"...`);
   try {
+    // FIX: Added videoEmbeddable=true to strictly prevent restricted playback frames
     const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q=${encodeURIComponent(query)}&type=video&videoEmbeddable=true&key=${YT_API_KEY}`);
     const data = await res.json();
+    
     if (data.items && data.items.length > 0) {
-      document.getElementById('ytFrame').src = `https://www.youtube.com/embed/${data.items[0].id.videoId}?autoplay=1`;
-      document.getElementById('ytContainer').style.display = 'flex';
+      const vid = data.items[0].id.videoId;
+      const ytContainer = document.getElementById('ytContainer');
+      const ytFrame = document.getElementById('ytFrame');
+      ytFrame.src = `https://www.youtube.com/embed/${vid}?autoplay=1`;
+      ytContainer.style.display = 'flex';
       toast('✅ Playing Video!');
-    } else toast('❌ No embeddable video found.');
+    } else {
+      toast('❌ No embeddable video found.');
+    }
   } catch (error) { toast('❌ YouTube search failed.'); }
 }
-function closeYouTube() { document.getElementById('ytContainer').style.display = 'none'; document.getElementById('ytFrame').src = ''; }
 
+function closeYouTube() {
+  document.getElementById('ytContainer').style.display = 'none';
+  document.getElementById('ytFrame').src = ''; // Cleanly drops the source process
+}
+
+// ════════════════════════════════════════════════════════
+// TOOL EXECUTION (Expanded for New Characters & Shapes)
+// ════════════════════════════════════════════════════════
 async function executeTools(toolCalls) {
   for (const tc of toolCalls) {
     const args = tc.args || {};
     switch(tc.name) {
-      case 'move_forward':   await startDirectMove('F'); await sleep((args.duration_seconds || 1)*1000); await stopDirectMove(); break;
-      case 'move_backward':  await startDirectMove('B'); await sleep((args.duration_seconds || 1)*1000); await stopDirectMove(); break;
-      case 'turn_left':      await startDirectMove('L'); await sleep((args.duration_seconds || 0.5)*1000); await stopDirectMove(); break;
-      case 'turn_right':     await startDirectMove('R'); await sleep((args.duration_seconds || 0.5)*1000); await stopDirectMove(); break;
-      case 'stop_robot':     await stopDirectMove(); break;
-      case 'dance':          await doDance(); break;
-      case 'nod_head':       const times = args.times || 1; for (let i = 0; i < times; i++) { await doAction('nod'); } break;
-      case 'wander':         await doWander(); break;
-      case 'capture_photo':  autoCapture(); break;
-      case 'search_youtube': if (args.query) await openYouTube(args.query); break;
-      case 'call_contact':   if (args.phone_number) window.location.href = `tel:${args.phone_number}`; break;
-      case 'react_to_activity':
-        showActivityOverlay(args.activity); break;
+      case 'move_forward':  
+        await startDirectMove('F'); await sleep((args.duration_seconds || 1) * 1000); await stopDirectMove(); await sleep(100); break;
+      case 'move_backward': 
+        await startDirectMove('B'); await sleep((args.duration_seconds || 1) * 1000); await stopDirectMove(); await sleep(100); break;
+      case 'turn_left':     
+        await startDirectMove('L'); await sleep((args.duration_seconds || 0.5) * 1000); await stopDirectMove(); await sleep(100); break;
+      case 'turn_right':    
+        await startDirectMove('R'); await sleep((args.duration_seconds || 0.5) * 1000); await stopDirectMove(); await sleep(100); break;
+      case 'stop_robot':    
+        await stopDirectMove(); break;
+      case 'dance':         
+        await doDance(); break;
+      case 'nod_head':      
+        const times = args.times || 1; for (let i = 0; i < times; i++) { await doAction('nod'); } break;
+      case 'wander':        
+        await doWander(); break;
+      case 'capture_photo': 
+        autoCapture(); break;
+      case 'search_youtube':
+        if (args.query) { await openYouTube(args.query); } break;
+      case 'call_contact':
+        if (args.phone_number) { toast(`📞 Opening dialer for ${args.phone_number}...`); window.location.href = `tel:${args.phone_number}`; } break;
+      
+      // -- NEW ACTIONS --
       case 'perform_action':
-        const actionMap = { happy: 'H', scared: 'X', shake: '6', neck_dance: 'K', spin: 'P', reverse_nod: '7', look_left: 'A', look_right: 'C' };
-        if (actionMap[args.action]) { await bleSend(actionMap[args.action]); await sleep(1000); await bleSend('E'); }
+        const actionMap = { happy: 'H', scared: 'X', shake: '6', neck_dance: 'K', spin: 'P', reverse_nod: '7' };
+        if (actionMap[args.action]) await bleSend(actionMap[args.action]);
         break;
       case 'draw_shape':
-        if (args.shape === 'circle') { await bleSend('P'); await sleep(1500); } 
-        else if (args.shape === 'rectangle') { for (let i = 0; i < 4; i++) { await bleSend('F'); await sleep(800); await bleSend('L'); await sleep(400); } await bleSend('S'); }
+        if (args.shape === 'circle') {
+          await bleSend('P'); await sleep(1500); // Uses Arduino's built in spin command
+        } else if (args.shape === 'rectangle') {
+          for (let i = 0; i < 4; i++) {
+            await bleSend('F'); await sleep(800);
+            await bleSend('L'); await sleep(400); // 90 degree turn logic
+          }
+          await bleSend('S');
+        }
         break;
       case 'dance_style':
-        if (args.style === 'michael_jackson') { await bleSend('B'); await sleep(1200); await bleSend('P'); await sleep(1500); await bleSend('K'); await sleep(2000); await bleSend('6'); await sleep(1000); await bleSend('S'); }
+        if (args.style === 'michael_jackson') {
+          await bleSend('B'); await sleep(1200); // Moonwalk
+          await bleSend('P'); await sleep(1500); // Spin
+          await bleSend('K'); await sleep(2000); // Neck pop
+          await bleSend('6'); await sleep(1000); // Shake
+          await bleSend('S');
+        }
         break;
     }
   }
@@ -345,8 +417,8 @@ function updateMemoryPill() { document.getElementById('memoryPill').textContent 
 // ════════════════════════════════════════════════════════
 // CAMERA
 // ════════════════════════════════════════════════════════
-async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); document.getElementById('webcamView').srcObject = videoStream; } catch(e) {} }
-function captureSnapshot() { const video = document.getElementById('webcamView'), canvas = document.getElementById('captureCanvas'); if (!video || !canvas || !videoStream) return null; const ctx = canvas.getContext('2d'); canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480; ctx.drawImage(video, 0, 0, canvas.width, canvas.height); return canvas.toDataURL('image/jpeg', 0.85); }
+async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); document.getElementById('webcamView').srcObject = videoStream; } catch(e) { console.warn('Camera unavailable:', e); } }
+function captureSnapshot() { const video = document.getElementById('webcamView'), canvas = document.getElementById('captureCanvas'); if (!video || !canvas || !videoStream) { toast('⚠️ Camera not ready'); return null; } const ctx = canvas.getContext('2d'); canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480; ctx.drawImage(video, 0, 0, canvas.width, canvas.height); return canvas.toDataURL('image/jpeg', 0.85); }
 function triggerFlash() { const f = document.createElement('div'); Object.assign(f.style, { position:'fixed', inset:'0', background:'#fff', zIndex:'9999', opacity:'1', transition:'opacity 0.4s ease' }); document.body.appendChild(f); setTimeout(() => { f.style.opacity = '0'; setTimeout(() => f.remove(), 400); }, 50); }
 function manualCapture() { const dataUrl = captureSnapshot(); if (dataUrl) { appendImageMsg('user', dataUrl); toast('📸 Captured!'); } }
 function autoCapture() { triggerFlash(); setTimeout(() => { const dataUrl = captureSnapshot(); if (dataUrl) { appendImageMsg('bot', dataUrl); doChat('Describe in detail what you see in this photo!', dataUrl); toast('📸 Snap!'); } }, 120); }
@@ -427,26 +499,29 @@ function setMouthPath(type, open = 0) {
 }
 
 // ════════════════════════════════════════════════════════
-// SLEEP / WAKE / IDLE
+// SLEEP / WAKE / IDLE / MIC
 // ════════════════════════════════════════════════════════
-function goToSleep() { if(isSleeping)return; isSleeping=true; setEmotion('sleeping',true); stopTTS(); startZZZ(); if(bleConnected) bleSend('S'); }
+function goToSleep() { if(isSleeping)return; isSleeping=true; setEmotion('sleeping',true); stopTTS(); startZZZ(); if(bleConnected) bleSend('S'); } // Ensures engines stop on sleep
 function wakeUp() { if(!isSleeping)return; isSleeping=false; stopZZZ(); setEmotion('neutral',true); resetInactivity(); }
 function startZZZ() { const g = document.getElementById('sleepZZZ'), z1 = document.getElementById('z1'), z2 = document.getElementById('z2'), z3 = document.getElementById('z3'); g.style.opacity = '1'; let t = 0; (function f() { t+=0.03; const b=Math.sin(t)*0.3+0.7; z1.setAttribute('opacity',b); z2.setAttribute('opacity',b*0.7); z3.setAttribute('opacity',b*0.45); z1.setAttribute('y',40-Math.sin(t*0.7)*7); z2.setAttribute('y',24-Math.sin(t*0.7+.5)*7); z3.setAttribute('y',6-Math.sin(t*0.7+1)*7); zzzAnim=requestAnimationFrame(f); })(); }
 function stopZZZ() { if(zzzAnim)cancelAnimationFrame(zzzAnim); document.getElementById('sleepZZZ').style.opacity = '0'; }
 
+// NEW: Handled combined inactivity and fidgeting checks
 function resetInactivity() { 
   if(isSleeping) wakeUp(); 
-  clearTimeout(inactTimer); clearTimeout(fidgetTimer); 
+  clearTimeout(inactTimer); 
+  clearTimeout(fidgetTimer); 
   inactTimer = setTimeout(goToSleep, SLEEP_MS); 
-  fidgetTimer = setTimeout(doFidget, 60000); // Trigger a random move after 1 minute idle
+  fidgetTimer = setTimeout(doFidget, 60000); // 1 minute of idle time
 }
 
+// NEW: Random subtle idle movements 
 async function doFidget() {
   if(!bleConnected || isSleeping || isBusy) return;
-  const fidgetMoves = ['A', 'C', 'E', 'V', 'T', 'U']; // Neck Left, Right, Base, Tilt Mid, Max, Base
+  const fidgetMoves = ['A', 'C', 'E', 'V', 'T', 'U']; // Pan left, right, base, tilt mid, max, base
   const randomMove = fidgetMoves[Math.floor(Math.random() * fidgetMoves.length)];
   await bleSend(randomMove);
-  fidgetTimer = setTimeout(doFidget, 30000 + Math.random() * 30000); 
+  fidgetTimer = setTimeout(doFidget, 30000 + Math.random() * 30000); // Between 30s and 60s
 }
 
 ['click','keydown','touchstart'].forEach(e => document.addEventListener(e, resetInactivity, {passive:true}));
@@ -456,7 +531,6 @@ function showTyping() { const c=document.getElementById('messages'),el=document.
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
 
-// ... (Mic and Wake word listening remains unchanged) ...
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 function toggleAlwaysOnMic() { if(!SR){toast('⚠️ Speech API not supported');return;} alwaysOnMic=!alwaysOnMic; if(alwaysOnMic){startBgListen(); updateMicBadge('wake');} else{stopAllRecog(); updateMicBadge('off');} }
 function updateMicBadge(state) { const b=document.getElementById('micBadge'); if(state==='off'){b.className='badge mic-off'; b.textContent='🎤 OFF';} if(state==='wake'){b.className='badge mic-wake'; b.textContent='👂 WAKE';} if(state==='cmd'){b.className='badge mic-on'; b.textContent='🔴 REC';} }
@@ -471,4 +545,7 @@ function hideWakeOverlay() { document.getElementById('wakeOverlay').classList.re
 function setListenRipples(on) { document.getElementById('rippleGroup').style.opacity = on?'1':'0'; if(on) rippleLoop(); }
 function rippleLoop() { const r1=document.getElementById('rp1'), r2=document.getElementById('rp2'); let t=0; (function f(){ t+=0.04; const s1=5+Math.sin(t)*10+10, s2=5+Math.sin(t+Math.PI)*10+10; r1.setAttribute('r',s1); r1.setAttribute('opacity',Math.max(0,0.7-s1/30)); r2.setAttribute('r',s2); r2.setAttribute('opacity',Math.max(0,0.5-s2/35)); if(document.getElementById('rippleGroup').style.opacity==='1') requestAnimationFrame(f); })(); }
 
+// ════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => { initEyes(); resetInactivity(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral'); if (synth) { synth.getVoices(); synth.addEventListener('voiceschanged', () => synth.getVoices()); } });
