@@ -273,6 +273,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         </g>
         <rect x="95" y="152" width="110" height="34" rx="17" fill="none" stroke="#3b9eff" stroke-width="1.2" opacity="0.3" id="mouthRim" style="transition: opacity 0.3s;"/>
 
+        <g id="props-layer" style="pointer-events:none; transition: opacity 0.3s;">
+          <text id="prop-food" x="133" y="195" font-size="35" opacity="0" style="transition: opacity 0.3s, transform 0.3s; transform-origin: 150px 180px;">🍕</text>
+          <text id="prop-book" x="133" y="195" font-size="35" opacity="0" style="transition: opacity 0.3s, transform 0.3s; transform-origin: 150px 180px;">📖</text>
+          <text id="prop-dumbbell" x="133" y="195" font-size="35" opacity="0" style="transition: opacity 0.3s, transform 0.3s; transform-origin: 150px 180px;">🏋️</text>
+        </g>
+
         <g id="theme-overlays">
           <g id="theme-dog" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;">
             <path d="M 40 30 C -20 30, -30 160, 10 180 C 40 160, 50 100, 55 50 Z" fill="#b07a48" />
@@ -346,16 +352,17 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 </div>
 
 <div id="controlsScreen">
- <div id="dpadSection">
-    <div class="section-label">🕹 Direct Controls</div>
+  <div id="dpadSection">
     
-    <!-- NEW: Head Controls -->
-    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; margin-bottom:12px;">
-      <button class="act" onpointerdown="startDirectMove('A')" onpointerup="startDirectMove('E')" onpointerleave="startDirectMove('E')">👁️ Left</button>
-      <button class="act" onpointerdown="startDirectMove('T')" onpointerup="startDirectMove('U')" onpointerleave="startDirectMove('U')">⬆️ Up</button>
-      <button class="act" onpointerdown="startDirectMove('C')" onpointerup="startDirectMove('E')" onpointerleave="startDirectMove('E')">👁️ Right</button>
+    <div class="section-label">🤖 Head Control</div>
+    <div class="action-grid" style="margin-bottom: 14px;">
+       <button class="act" onpointerdown="startDirectMove('A')" onpointerup="startDirectMove('E')">👀 Left</button>
+       <button class="act" onclick="startDirectMove('E')">👁 Center</button>
+       <button class="act" onpointerdown="startDirectMove('C')" onpointerup="startDirectMove('E')">👀 Right</button>
+       <button class="act" onclick="startDirectMove('5')">🙂 Nod</button>
     </div>
 
+    <div class="section-label">🕹 Direct Wheels</div>
     <div class="dpad">
       <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▲</button>
       <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">◀</button>
@@ -363,26 +370,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
       <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▶</button>
       <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▼</button>
     </div>
-    <!-- <div class="action-grid">
+    <div class="action-grid" style="margin-top: 14px;">
       <button class="act" onclick="doAction('dance')">💃 Dance</button>
-      <button class="act" onclick="doAction('nod')">😊 Nod</button>
       <button class="act" onclick="doAction('wander')">🗺️ Wander</button>
       <button class="act" onclick="clearChat()">🗑 Clear</button>
     </div>
-    <div id="memoryPill">Memory: 0 / 50 msgs</div>
-    <button class="act" onclick="enableMotionSensors()" id="gyroBtn" style="margin-top:10px; width:100%;">🧭 Enable Motion Sync</button>
-  </div> -->
-    <div class="action-grid">
-      <button class="act" onclick="doAction('dance')">💃 Dance</button>
-      <button class="act" onclick="doAction('nod')">😊 Nod</button>
-      <button class="act" onclick="doAction('wander')">🗺️ Wander</button>
-      <button class="act" onclick="clearChat()">🗑 Clear</button>
-      <button class="act" onpointerdown="bleSend('A')" onpointerup="bleSend('E')" onpointerleave="bleSend('E')">👀 Look Left</button>
-      <button class="act" onpointerdown="bleSend('C')" onpointerup="bleSend('E')" onpointerleave="bleSend('E')">👀 Look Right</button>
-    </div>
-    
-    <div id="memoryPill">Memory: 0 / 50 msgs</div>
-    
+    <div id="memoryPill" style="margin-top:10px;">Memory: 0 / 50 msgs</div>
     <button class="act" onclick="enableMotionSensors()" id="gyroBtn" style="margin-top:10px; width:100%;">🧭 Enable Motion Sync</button>
   </div>
 
@@ -406,9 +399,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div class="sugs">
       <button class="sug" style="color:var(--theme-color);border-color:var(--theme-glow);" onclick="manualCapture()">📸 Snap</button>
       <button class="sug" onclick="sendSug('Walk forward for 3 seconds then nod 2 times')">🏃 Combo Move</button>
+      <button class="sug" onclick="sendSug('Dance like Michael Jackson')">🕺 MJ Dance</button>
+      <button class="sug" onclick="sendSug('Draw a circle')">⭕ Shape</button>
+      <button class="sug" onclick="sendSug('I am eating pizza right now')">🍕 Eating</button>
       <button class="sug" onclick="sendSug('Call mom')">📞 Call</button>
       <button class="sug" onclick="sendSug('Play lofi hip hop on youtube')">🎵 Lofi</button>
-      <button class="sug" onclick="sendSug('What can you do?')">🤔 Help</button>
     </div>
     <div id="uploadPreviewBar" style="display:none;padding:6px 12px;background:var(--card);border-top:1px solid var(--border);align-items:center;gap:10px;">
       <div style="position:relative;width:42px;height:42px;flex-shrink:0;">
@@ -438,7 +433,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div class="settings-row">
       <div class="settings-label">👤 Your Identity</div>
       <div class="settings-input-wrap">
-        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name (e.g., Bhubhu's Human)">
+        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name">
       </div>
     </div>
     <div class="settings-row">
