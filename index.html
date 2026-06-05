@@ -363,7 +363,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
       <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▶</button>
       <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▼</button>
     </div>
-    <div class="action-grid">
+    <!-- <div class="action-grid">
       <button class="act" onclick="doAction('dance')">💃 Dance</button>
       <button class="act" onclick="doAction('nod')">😊 Nod</button>
       <button class="act" onclick="doAction('wander')">🗺️ Wander</button>
@@ -371,6 +371,14 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     </div>
     <div id="memoryPill">Memory: 0 / 50 msgs</div>
     <button class="act" onclick="enableMotionSensors()" id="gyroBtn" style="margin-top:10px; width:100%;">🧭 Enable Motion Sync</button>
+  </div> -->
+  <div class="action-grid">
+      <button class="act" onclick="doAction('dance')">💃 Dance</button>
+      <button class="act" onclick="doAction('nod')">😊 Nod</button>
+      <button class="act" onclick="doAction('wander')">🗺️ Wander</button>
+      <button class="act" onclick="clearChat()">🗑 Clear</button>
+      <button class="act" onpointerdown="bleSend('A')" onpointerup="bleSend('E')" onpointerleave="bleSend('E')">👀 Look Left</button>
+      <button class="act" onpointerdown="bleSend('C')" onpointerup="bleSend('E')" onpointerleave="bleSend('E')">👀 Look Right</button>
   </div>
 
   <div id="chatSection">
