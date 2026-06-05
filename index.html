@@ -273,10 +273,25 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         </g>
         <rect x="95" y="152" width="110" height="34" rx="17" fill="none" stroke="#3b9eff" stroke-width="1.2" opacity="0.3" id="mouthRim" style="transition: opacity 0.3s;"/>
 
-        <g id="props-layer" style="pointer-events:none; transition: opacity 0.3s;">
-          <text id="prop-food" x="133" y="195" font-size="35" opacity="0" style="transition: opacity 0.3s, transform 0.3s; transform-origin: 150px 180px;">🍕</text>
-          <text id="prop-book" x="133" y="195" font-size="35" opacity="0" style="transition: opacity 0.3s, transform 0.3s; transform-origin: 150px 180px;">📖</text>
-          <text id="prop-dumbbell" x="133" y="195" font-size="35" opacity="0" style="transition: opacity 0.3s, transform 0.3s; transform-origin: 150px 180px;">🏋️</text>
+        <g id="propsLayer" style="pointer-events: none; z-index: 50;">
+          <g id="prop-apple" class="prop-item" style="opacity:0; transition:opacity 0.4s; transform-origin: center;">
+            <path d="M 150 175 C 130 175, 130 145, 150 155 C 170 145, 170 175, 150 175 Z" fill="#ff5f6d"/>
+            <path d="M 150 155 Q 155 145 160 145" fill="none" stroke="#22d3a0" stroke-width="2"/>
+          </g>
+          <g id="prop-book" class="prop-item" style="opacity:0; transition:opacity 0.4s;">
+            <path d="M 110 180 L 150 190 L 190 180 L 190 150 L 150 160 L 110 150 Z" fill="#3b9eff" stroke="#fff" stroke-width="1.5"/>
+            <path d="M 150 190 L 150 160" stroke="#fff" stroke-width="1.5"/>
+          </g>
+          <g id="prop-dumbbell" class="prop-item" style="opacity:0; transition:opacity 0.4s;">
+            <rect x="110" y="165" width="80" height="6" fill="#a855f7" rx="3"/>
+            <rect x="100" y="153" width="15" height="30" fill="#3d5470" rx="2"/>
+            <rect x="185" y="153" width="15" height="30" fill="#3d5470" rx="2"/>
+          </g>
+          <g id="prop-laptop" class="prop-item" style="opacity:0; transition:opacity 0.4s;">
+            <rect x="120" y="145" width="60" height="35" fill="#3d5470" rx="3"/>
+            <rect x="125" y="150" width="50" height="25" fill="#ddeeff" rx="1"/>
+            <polygon points="100,185 200,185 180,180 120,180" fill="#a855f7"/>
+          </g>
         </g>
 
         <g id="theme-overlays">
@@ -353,16 +368,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 
 <div id="controlsScreen">
   <div id="dpadSection">
-    
-    <div class="section-label">🤖 Head Control</div>
-    <div class="action-grid" style="margin-bottom: 14px;">
-       <button class="act" onpointerdown="startDirectMove('A')" onpointerup="startDirectMove('E')">👀 Left</button>
-       <button class="act" onclick="startDirectMove('E')">👁 Center</button>
-       <button class="act" onpointerdown="startDirectMove('C')" onpointerup="startDirectMove('E')">👀 Right</button>
-       <button class="act" onclick="startDirectMove('5')">🙂 Nod</button>
-    </div>
-
-    <div class="section-label">🕹 Direct Wheels</div>
+    <div class="section-label">🕹 Direct Controls</div>
     <div class="dpad">
       <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▲</button>
       <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">◀</button>
@@ -370,12 +376,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
       <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▶</button>
       <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▼</button>
     </div>
-    <div class="action-grid" style="margin-top: 14px;">
+    <div class="action-grid">
       <button class="act" onclick="doAction('dance')">💃 Dance</button>
+      <button class="act" onclick="doAction('nod')">😊 Nod</button>
       <button class="act" onclick="doAction('wander')">🗺️ Wander</button>
       <button class="act" onclick="clearChat()">🗑 Clear</button>
     </div>
-    <div id="memoryPill" style="margin-top:10px;">Memory: 0 / 50 msgs</div>
+    <div id="memoryPill">Memory: 0 / 50 msgs</div>
     <button class="act" onclick="enableMotionSensors()" id="gyroBtn" style="margin-top:10px; width:100%;">🧭 Enable Motion Sync</button>
   </div>
 
@@ -386,7 +393,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         <span style="font-weight: bold; font-size: 0.8rem;">petRO Media Player</span>
         <button class="close-yt-btn" onclick="closeYouTube()">Close</button>
       </div>
-      <iframe id="ytFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+      <iframe id="ytFrame" allow="autoplay; encrypted-media" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
     </div>
 
     <div class="section-label" style="padding-top:14px;">💬 Chat with petRO</div>
@@ -399,11 +406,9 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div class="sugs">
       <button class="sug" style="color:var(--theme-color);border-color:var(--theme-glow);" onclick="manualCapture()">📸 Snap</button>
       <button class="sug" onclick="sendSug('Walk forward for 3 seconds then nod 2 times')">🏃 Combo Move</button>
-      <button class="sug" onclick="sendSug('Dance like Michael Jackson')">🕺 MJ Dance</button>
-      <button class="sug" onclick="sendSug('Draw a circle')">⭕ Shape</button>
-      <button class="sug" onclick="sendSug('I am eating pizza right now')">🍕 Eating</button>
       <button class="sug" onclick="sendSug('Call mom')">📞 Call</button>
       <button class="sug" onclick="sendSug('Play lofi hip hop on youtube')">🎵 Lofi</button>
+      <button class="sug" onclick="sendSug('Draw a circle')">⭕ Circle</button>
     </div>
     <div id="uploadPreviewBar" style="display:none;padding:6px 12px;background:var(--card);border-top:1px solid var(--border);align-items:center;gap:10px;">
       <div style="position:relative;width:42px;height:42px;flex-shrink:0;">
@@ -433,7 +438,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div class="settings-row">
       <div class="settings-label">👤 Your Identity</div>
       <div class="settings-input-wrap">
-        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name">
+        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name (e.g., Bhubhu's Human)">
       </div>
     </div>
     <div class="settings-row">
