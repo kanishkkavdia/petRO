@@ -39,16 +39,22 @@ let videoStream = null, currentUploadedImage = null;
 let ttsActive = false, mouthTalkAnim = null, toastTimer = null;
 let chatHistory = [], motionEnabled = false;
 
-// Fix variables for Audio conflict and Motion loop
 let isVideoPlaying = false, micSuspendedForVideo = false, grooveTimer = null;
 let hardwareActive = false, hwTimeout = null;
+
+// YouTube API variables
+let ytPlayer = null;
+let isYtApiReady = false;
+
+window.onYouTubeIframeAPIReady = function() {
+  isYtApiReady = true;
+};
 
 // ════════════════════════════════════════════════════════
 // FULLSCREEN & API & THEME LOGIC
 // ════════════════════════════════════════════════════════
 async function toggleFullscreen() {
-  if (!document.fullscreenElement) {
-    try { await document.documentElement.requestFullscreen(); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); } catch(e) { toast('⚠️ Fullscreen not supported'); }
+  if (!document.fullscreenElement) { try { await document.documentElement.requestFullscreen(); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); } catch(e) { toast('⚠️ Fullscreen not supported'); }
   } else { try { await document.exitFullscreen(); if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e) {} }
 }
 
@@ -65,6 +71,8 @@ function applyTheme() {
   root.style.setProperty('--theme-color', t.color); root.style.setProperty('--bg', t.bg); root.style.setProperty('--surface', t.surface); root.style.setProperty('--card', t.card);
   document.getElementById('stop1-2').setAttribute('stop-color', t.color); document.getElementById('stop2-2').setAttribute('stop-color', t.color);
   document.getElementById('lGlow').setAttribute('stroke', t.color); document.getElementById('rGlow').setAttribute('stroke', t.color);
+  
+  // Theme face overlays
   ['dog', 'terminator', 'monkey', 'starwars', 'transformer'].forEach(a => { const el = document.getElementById('theme-' + a); if (el) el.style.opacity = (tId === a) ? '1' : '0'; });
   const mg = document.getElementById('mouthGroup'), mr = document.getElementById('mouthRim');
   if (tId === 'transformer') { mg.style.opacity = '0'; mr.style.opacity = '0'; } else { mg.style.opacity = '1'; mr.style.opacity = '1'; }
@@ -96,10 +104,10 @@ function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); 
 
 async function bleSend(cmd) {
   if (!bleCmdChar) return;
-  // Deafener: Ignore motion sync gyro updates for 1.5s so robot doesn't react to its own motor torque
+  // Increase deafener to 3 seconds and threshold to 25 to stop motion sync feedback loop
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
-  hwTimeout = setTimeout(() => hardwareActive = false, 1500);
+  hwTimeout = setTimeout(() => hardwareActive = false, 3000);
 
   if (!bleDevice?.gatt?.connected) { try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); } catch(e) { setBLE(false); return; } }
   try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; }
@@ -132,20 +140,20 @@ function enableMotionSensors() {
 let lastAccel = 0;
 function bindSensors() {
   window.addEventListener('devicemotion', (e) => { 
-    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return; // Ignores own hardware movements
+    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
     let acc = e.accelerationIncludingGravity; if(!acc) return; 
     let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z); 
-    if(Math.abs(total - lastAccel) > 16) { setEmotion('dizzy'); resetInactivity(); } 
+    if(Math.abs(total - lastAccel) > 25) { setEmotion('dizzy'); resetInactivity(); } // Increased threshold to 25
     lastAccel = total; 
   });
   window.addEventListener('deviceorientation', (e) => { 
-    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return; // Ignores own hardware movements
+    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
     if(Math.abs(e.beta) > 60 || Math.abs(e.gamma) > 60) { if(currentEmotion !== 'afraid') setEmotion('afraid'); resetInactivity(); } 
   });
 }
 
 // ════════════════════════════════════════════════════════
-// GEMINI AGENT & SYSTEM PROMPT BUILDER
+// GEMINI AGENT
 // ════════════════════════════════════════════════════════
 function buildSystemPrompt() {
   const uName = localStorage.getItem('petro_user_name') || ''; const theme = THEMES[localStorage.getItem('petro_theme') || 'default'];
@@ -214,14 +222,14 @@ function detectEmotion(toolCalls, reply) {
 function startGroove() {
   if (grooveTimer || !bleConnected) return;
   let step = 0;
-  // Slow bobbing of the head (Using neck pan/tilt primitives)
-  const grooveMoves = ['V', 'U', '7', '8']; 
+  // Expanded groove moves (combos of neck and short body turns)
+  const grooveMoves = ['V', '1', '2', 'U', '7', '8', '3', '4']; 
   grooveTimer = setInterval(() => {
-     if (!isMoving && !isBusy && bleConnected) { bleSend(grooveMoves[step % 4]); step++; }
-  }, 2200);
+     if (!isMoving && !isBusy && bleConnected) { bleSend(grooveMoves[step % grooveMoves.length]); step++; }
+  }, 1800);
 }
 
-function stopGroove() { clearInterval(grooveTimer); grooveTimer = null; if (bleConnected) bleSend('E'); } // 'E' is look center
+function stopGroove() { clearInterval(grooveTimer); grooveTimer = null; if (bleConnected) bleSend('E'); }
 
 async function openYouTube(query, isEntertainment = false) {
   toast(`🔍 Searching YouTube for "${query}"...`);
@@ -230,11 +238,28 @@ async function openYouTube(query, isEntertainment = false) {
     const data = await res.json();
     if (data.items && data.items.length > 0) {
       const vid = data.items[0].id.videoId;
-      document.getElementById('ytFrame').src = `https://www.youtube.com/embed/${vid}?autoplay=1`;
+      
       document.getElementById('ytContainer').style.display = 'flex';
+      document.getElementById('normalControls').style.display = 'none';
+      document.getElementById('miniPetroArea').style.display = 'flex';
+      
+      if (isYtApiReady) {
+          if (!ytPlayer) {
+              ytPlayer = new YT.Player('ytPlayerDiv', {
+                  height: '100%', width: '100%', videoId: vid,
+                  playerVars: { 'autoplay': 1, 'controls': 1 },
+                  events: { 'onStateChange': onPlayerStateChange }
+              });
+          } else {
+              ytPlayer.loadVideoById(vid);
+          }
+      } else {
+         // Fallback if API didn't load
+         document.getElementById('ytPlayerDiv').innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
+      }
+      
       appendMsg('bot', `Now Playing. If video gets stuck, watch here: https://youtube.com/watch?v=${vid}`);
       
-      // Suspend Mic & Start Groove
       isVideoPlaying = true;
       if (alwaysOnMic) { stopAllRecog(); micSuspendedForVideo = true; toast('🎤 Mic paused for media'); }
       if (isEntertainment || query.toLowerCase().includes('music') || query.toLowerCase().includes('dance')) { startGroove(); }
@@ -243,19 +268,30 @@ async function openYouTube(query, isEntertainment = false) {
   } catch (error) { toast('❌ YouTube search failed.'); }
 }
 
+function onPlayerStateChange(event) {
+    if (event.data == YT.PlayerState.ENDED) {
+        closeYouTube();
+    }
+}
+
 function closeYouTube() { 
   document.getElementById('ytContainer').style.display = 'none'; 
-  document.getElementById('ytFrame').src = ''; 
+  
+  if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+      ytPlayer.stopVideo();
+  } else {
+      document.getElementById('ytPlayerDiv').innerHTML = ''; // Fallback clear
+  }
+  
+  document.getElementById('normalControls').style.display = 'flex';
+  document.getElementById('miniPetroArea').style.display = 'none';
+  
   isVideoPlaying = false;
   stopGroove();
   
-  // Restore Mic
   if (micSuspendedForVideo) {
-      alwaysOnMic = true; 
-      startBgListen(); 
-      updateMicBadge('wake'); 
-      micSuspendedForVideo = false;
-      toast('🎤 Mic resumed');
+      alwaysOnMic = true; startBgListen(); updateMicBadge('wake'); 
+      micSuspendedForVideo = false; toast('🎤 Mic resumed');
   }
 }
 
@@ -340,7 +376,7 @@ function appendImageMsg(role, dataUrl) { const c = document.getElementById('mess
 // ════════════════════════════════════════════════════════
 const synth = window.speechSynthesis;
 function speak(text) {
-  if (!synth || isVideoPlaying) return; // Optional: avoid talking over video
+  if (!synth || isVideoPlaying) return; 
   synth.cancel(); const clean = text.replace(/\p{Emoji}/gu, '').replace(/\[emotion:\w+\]/gi, '').trim(); if (!clean) return;
   const utt = new SpeechSynthesisUtterance(clean);
   const theme = localStorage.getItem('petro_theme') || 'default'; let pitch = 1.0, rate = 1.05;
@@ -368,6 +404,7 @@ function scheduleBlink() { blinkTimer = setTimeout(() => { doBlink(); scheduleBl
 const emotions = {
   neutral:  { irisR:42, pupilR:22, color:'var(--theme-color)', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:0,  tears:false },
   happy:    { irisR:48, pupilR:26, color:'#22d3a0', lidTopY:-65, lidBotY:142, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:12, tears:false },
+  curious:  { irisR:44, pupilR:24, color:'#3b9eff', lidTopY:-65, lidBotY:200, browW:5, browSlant:5,  mouthType:'small',  mouthOpen:8,  tears:false },
   excited:  { irisR:52, pupilR:30, color:'#ffd23f', lidTopY:-65, lidBotY:200, browW:0, browSlant:-6, mouthType:'laugh',  mouthOpen:20, tears:true  },
   sad:      { irisR:30, pupilR:15, color:'#6b8db5', lidTopY:-18, lidBotY:200, browW:8, browSlant:8,  mouthType:'frown',  mouthOpen:0,  tears:true  },
   angry:    { irisR:36, pupilR:17, color:'#ff5f6d', lidTopY:-24, lidBotY:200, browW:9, browSlant:-9, mouthType:'flat',   mouthOpen:0,  tears:false },
@@ -387,7 +424,7 @@ function setEmotion(name, force = false) {
   if (name !== 'neutral' && name !== 'sleeping') emotionResetTimer = setTimeout(() => setEmotion('neutral'), 5000);
 
   if (bleConnected && !force && name !== 'sleeping') {
-      const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X' };
+      const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X', curious:'X' };
       if (hwMap[name]) bleSend(hwMap[name]);
   }
 
@@ -420,6 +457,12 @@ function scheduleIdleMove() {
     if (!isSleeping && !isBusy && bleConnected && !isVideoPlaying) {
        const idleMoves = ['7', '8', 'E', 'C', 'A', 'V', 'U']; 
        bleSend(idleMoves[Math.floor(Math.random() * idleMoves.length)]);
+       
+       // Inject random mild emotion while idling
+       if (Math.random() > 0.5) {
+           const idleEmotions = ['happy', 'focused', 'curious', 'neutral'];
+           setEmotion(idleEmotions[Math.floor(Math.random() * idleEmotions.length)]);
+       }
     }
     scheduleIdleMove();
   }, 10000 + Math.random() * 15000); 
@@ -431,24 +474,63 @@ function showTyping() { const c=document.getElementById('messages'),el=document.
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
 
+// ── NEW: EARS VISUAL OVERLAY FOR MIC ──
+function toggleThemeEars(show) {
+  const tId = document.getElementById('themeSelect').value || 'default';
+  const group = document.getElementById('earsGroup');
+  const statusTxt = document.getElementById('listeningStatus');
+  
+  if (!show) { 
+      group.style.opacity = '0'; 
+      statusTxt.style.opacity = '0';
+      return; 
+  }
+  
+  // Hide all ear types first
+  document.querySelectorAll('.ear-theme').forEach(el => el.style.display = 'none');
+  
+  // Show specific ear
+  if (tId === 'dog') document.querySelector('.ear-dog').style.display = 'block';
+  else if (tId === 'monkey') document.querySelector('.ear-monkey').style.display = 'block';
+  else if (tId === 'terminator' || tId === 'transformer') document.querySelector('.ear-terminator').style.display = 'block';
+  else document.querySelector('.ear-default').style.display = 'block';
+
+  group.style.opacity = '1';
+  statusTxt.style.opacity = '1';
+}
+
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 function toggleAlwaysOnMic() { if(!SR){toast('⚠️ Speech API not supported');return;} alwaysOnMic=!alwaysOnMic; if(alwaysOnMic){startBgListen(); updateMicBadge('wake');} else{stopAllRecog(); updateMicBadge('off');} }
 function updateMicBadge(state) { const b=document.getElementById('micBadge'); if(state==='off'){b.className='badge mic-off'; b.textContent='🎤 OFF';} if(state==='wake'){b.className='badge mic-wake'; b.textContent='👂 WAKE';} if(state==='cmd'){b.className='badge mic-on'; b.textContent='🔴 REC';} }
-function stopAllRecog() { try{bgRecog?.abort();}catch{} try{cmdRecog?.abort();}catch{} bgRecog=null; cmdRecog=null; micState='off'; setListenRipples(false); document.getElementById('wakeOverlay').classList.remove('active'); }
+function stopAllRecog() { try{bgRecog?.abort();}catch{} try{cmdRecog?.abort();}catch{} bgRecog=null; cmdRecog=null; micState='off'; toggleThemeEars(false); }
 
 function startBgListen() { 
-  if(!alwaysOnMic || micState==='cmd' || isVideoPlaying) return; // Ignores mic if video is playing
+  if(!alwaysOnMic || micState==='cmd' || isVideoPlaying) return; 
   try{bgRecog?.abort();}catch{} bgRecog = new SR(); bgRecog.continuous=true; bgRecog.interimResults=true; bgRecog.lang='en-US'; micState='wake'; bgRecog.onresult = e => { if(micState!=='wake')return; for(let i=e.resultIndex; i<e.results.length; i++){ const t=e.results[i][0].transcript.toLowerCase(); if(WAKE_WORDS.some(w=>t.includes(w))) wakeWordDetected(); } }; bgRecog.onerror = e => { if(e.error!=='aborted') restartBg(); }; bgRecog.onend = () => { if(alwaysOnMic && micState==='wake') setTimeout(restartBg,300); }; try{bgRecog.start();}catch{} 
 }
 
 function restartBg() { if(alwaysOnMic && micState==='wake' && !isVideoPlaying) startBgListen(); }
 function wakeWordDetected() { if(micState==='cmd')return; try{bgRecog?.abort();}catch{} resetInactivity(); showWakeOverlay(); listenForCommand(); }
-function listenForCommand() { micState='cmd'; updateMicBadge('cmd'); setListenRipples(true); cmdRecog = new SR(); cmdRecog.continuous=false; cmdRecog.interimResults=true; const sub = document.getElementById('wakeSub'); sub.textContent = 'Speak your command…'; cmdRecog.onresult = e => { const last = e.results[e.results.length-1]; const t = last[0].transcript; if(last.isFinal){ sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; document.getElementById('userInput').value=t; appendMsg('user',t); doChat(t); setTimeout(startBgListen,800); } else { sub.textContent=t+'…'; } }; cmdRecog.onerror = () => { hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400); }; cmdRecog.onend = () => { if(micState==='cmd'){hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400);} }; try{cmdRecog.start();}catch{hideWakeOverlay(); micState='wake'; startBgListen();} }
+function listenForCommand() { 
+    micState='cmd'; updateMicBadge('cmd'); 
+    cmdRecog = new SR(); cmdRecog.continuous=false; cmdRecog.interimResults=true; 
+    const sub = document.getElementById('listeningStatus'); sub.textContent = 'Listening...'; 
+    cmdRecog.onresult = e => { 
+        const last = e.results[e.results.length-1]; const t = last[0].transcript; 
+        if(last.isFinal){ 
+            sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; 
+            document.getElementById('userInput').value=t; appendMsg('user',t); doChat(t); 
+            setTimeout(startBgListen,800); 
+        } else { sub.textContent=t+'…'; } 
+    }; 
+    cmdRecog.onerror = () => { hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400); }; 
+    cmdRecog.onend = () => { if(micState==='cmd'){hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400);} }; 
+    try{cmdRecog.start();}catch{hideWakeOverlay(); micState='wake'; startBgListen();} 
+}
 function cancelWake() { try{cmdRecog?.abort();}catch{} hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,300); }
-function showWakeOverlay() { document.getElementById('wakeOverlay').classList.add('active'); updateMicBadge('cmd'); }
-function hideWakeOverlay() { document.getElementById('wakeOverlay').classList.remove('active'); setListenRipples(false); updateMicBadge('wake'); }
-function setListenRipples(on) { document.getElementById('rippleGroup').style.opacity = on?'1':'0'; if(on) rippleLoop(); }
-function rippleLoop() { const r1=document.getElementById('rp1'), r2=document.getElementById('rp2'); let t=0; (function f(){ t+=0.04; const s1=5+Math.sin(t)*10+10, s2=5+Math.sin(t+Math.PI)*10+10; r1.setAttribute('r',s1); r1.setAttribute('opacity',Math.max(0,0.7-s1/30)); r2.setAttribute('r',s2); r2.setAttribute('opacity',Math.max(0,0.5-s2/35)); if(document.getElementById('rippleGroup').style.opacity==='1') requestAnimationFrame(f); })(); }
+function showWakeOverlay() { toggleThemeEars(true); updateMicBadge('cmd'); }
+function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
+
 
 // ════════════════════════════════════════════════════════
 // INIT
