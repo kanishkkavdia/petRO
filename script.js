@@ -42,6 +42,8 @@ let chatHistory = [], motionEnabled = false;
 let isVideoPlaying = false, micSuspendedForVideo = false, grooveTimer = null;
 let hardwareActive = false, hwTimeout = null;
 
+let followUpActive = false, followUpTimeout = null;
+
 // YouTube API variables
 let ytPlayer = null;
 let isYtApiReady = false;
@@ -51,7 +53,7 @@ window.onYouTubeIframeAPIReady = function() {
 };
 
 // ════════════════════════════════════════════════════════
-// FULLSCREEN & API & THEME LOGIC
+// FULLSCREEN & API, THEME & USAGE LOGIC
 // ════════════════════════════════════════════════════════
 async function toggleFullscreen() {
   if (!document.fullscreenElement) { try { await document.documentElement.requestFullscreen(); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); } catch(e) { toast('⚠️ Fullscreen not supported'); }
@@ -64,8 +66,20 @@ function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.g
 function updateKeyBadge() { const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); if (k) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } else { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; s.className = 'key-status bad'; s.textContent = 'No key saved'; } }
 function toggleKeyVisibility() { const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; } else { inp.type = 'password'; btn.textContent = '👁'; } }
 
-function loadPersonalization() { document.getElementById('userNameInput').value = localStorage.getItem('petro_user_name') || ''; document.getElementById('themeSelect').value = localStorage.getItem('petro_theme') || 'default'; applyTheme(); }
-function savePersonalization() { localStorage.setItem('petro_user_name', document.getElementById('userNameInput').value.trim()); localStorage.setItem('petro_theme', document.getElementById('themeSelect').value); applyTheme(); toast('✅ Saved!'); }
+function loadPersonalization() { 
+  document.getElementById('userNameInput').value = localStorage.getItem('petro_user_name') || ''; 
+  document.getElementById('themeSelect').value = localStorage.getItem('petro_theme') || 'default'; 
+  document.getElementById('followUpSelect').value = localStorage.getItem('petro_followup') || '0';
+  applyTheme(); 
+}
+
+function savePersonalization() { 
+  localStorage.setItem('petro_user_name', document.getElementById('userNameInput').value.trim()); 
+  localStorage.setItem('petro_theme', document.getElementById('themeSelect').value); 
+  localStorage.setItem('petro_followup', document.getElementById('followUpSelect').value);
+  applyTheme(); toast('✅ Saved!'); 
+}
+
 function applyTheme() {
   const tId = document.getElementById('themeSelect').value || 'default', t = THEMES[tId], root = document.documentElement;
   root.style.setProperty('--theme-color', t.color); root.style.setProperty('--bg', t.bg); root.style.setProperty('--surface', t.surface); root.style.setProperty('--card', t.card);
@@ -79,9 +93,33 @@ function applyTheme() {
   if (currentEmotion === 'neutral') setEmotion('neutral', true);
 }
 
-function openSettings() { const k = getApiKey(); if (k) document.getElementById('apiKeyInput').value = k; document.getElementById('settingsModal').classList.add('open'); updateKeyBadge(); updateBleInfoBox(); updateMemoryPill(); }
+function openSettings() { 
+  const k = getApiKey(); if (k) document.getElementById('apiKeyInput').value = k; 
+  document.getElementById('settingsModal').classList.add('open'); 
+  updateKeyBadge(); updateBleInfoBox(); updateMemoryPill(); updateUsageUI();
+}
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
+
+// TOKEN & COST TRACKING
+function trackUsage(inTokens, outTokens) {
+    let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    usage.in += inTokens; usage.out += outTokens; usage.req += 1;
+    localStorage.setItem('petro_usage', JSON.stringify(usage));
+    updateUsageUI();
+}
+
+function updateUsageUI() {
+    const el = document.getElementById('usageBox'); if (!el) return;
+    let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    // Est cost based on standard Gemini Flash pricing (~$0.075/1M in, ~$0.30/1M out)
+    const cost = ((usage.in / 1000000) * 0.075) + ((usage.out / 1000000) * 0.30);
+    el.innerHTML = `Requests: <b>${usage.req}</b><br>Tokens: <b>${usage.in.toLocaleString()}</b> In / <b>${usage.out.toLocaleString()}</b> Out<br>Est. Cost: <b>$${cost.toFixed(5)}</b>`;
+}
+
+function clearUsage() {
+    localStorage.removeItem('petro_usage'); updateUsageUI(); toast('🗑 Usage reset');
+}
 
 // ════════════════════════════════════════════════════════
 // BLUETOOTH
@@ -104,7 +142,6 @@ function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); 
 
 async function bleSend(cmd) {
   if (!bleCmdChar) return;
-  // Increase deafener to 3 seconds and threshold to 25 to stop motion sync feedback loop
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
   hwTimeout = setTimeout(() => hardwareActive = false, 3000);
@@ -130,7 +167,7 @@ async function doDance() { toast('💃 Dancing!'); setEmotion('excited'); for (c
 async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); await bleSend('W'); await sleep(4000); toast('✅ Done'); }
 
 // ════════════════════════════════════════════════════════
-// MOTION SENSORS (Fixed feedback loop)
+// MOTION SENSORS
 // ════════════════════════════════════════════════════════
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -143,7 +180,7 @@ function bindSensors() {
     if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
     let acc = e.accelerationIncludingGravity; if(!acc) return; 
     let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z); 
-    if(Math.abs(total - lastAccel) > 25) { setEmotion('dizzy'); resetInactivity(); } // Increased threshold to 25
+    if(Math.abs(total - lastAccel) > 25) { setEmotion('dizzy'); resetInactivity(); } 
     lastAccel = total; 
   });
   window.addEventListener('deviceorientation', (e) => { 
@@ -199,7 +236,13 @@ async function callGemini(userText, imageDataUrl = null) {
   const resp = await fetch(`${GEMINI_URL}?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
   if (!resp.ok) { const err = await resp.json().catch(() => ({})); const msg = err?.error?.message || `HTTP ${resp.status}`; if (resp.status === 400 && msg.includes('API_KEY')) throw new Error('Invalid API key'); throw new Error(msg); }
-  const data = await resp.json(); const parts = data?.candidates?.[0]?.content?.parts || [];
+  const data = await resp.json(); 
+  
+  if (data.usageMetadata) {
+      trackUsage(data.usageMetadata.promptTokenCount || 0, data.usageMetadata.candidatesTokenCount || 0);
+  }
+
+  const parts = data?.candidates?.[0]?.content?.parts || [];
   let replyText = ''; const toolCalls = [];
 
   for (const part of parts) { if (part.text) replyText = part.text; if (part.functionCall) toolCalls.push({ name: part.functionCall.name, args: part.functionCall.args || {} }); }
@@ -213,7 +256,15 @@ async function callGemini(userText, imageDataUrl = null) {
 const EMOTION_MAP = { dance:'excited', nod_head:'happy', wander:'focused', move_forward:'focused', stop_robot:'neutral', capture_photo:'excited', search_youtube:'focused' };
 function detectEmotion(toolCalls, reply) {
   for (const tc of toolCalls) { if (EMOTION_MAP[tc.name]) return EMOTION_MAP[tc.name]; }
-  const l = reply.toLowerCase(); if (/haha|lol|funny|joke|laugh/.test(l)) return 'happy'; if (/danc|boogie/.test(l)) return 'excited'; if (/sorry|oops|error|can't|cannot/.test(l)) return 'sad'; if (/angry|mad/.test(l)) return 'angry'; return 'neutral';
+  const l = reply.toLowerCase(); 
+  if (/love|heart|hug|sweet|cute/.test(l)) return 'loving';
+  if (/wow|omg|surprise|whoa|amazing/.test(l)) return 'surprised';
+  if (/shy|blush|embarrass/.test(l)) return 'shy';
+  if (/haha|lol|funny|joke|laugh/.test(l)) return 'happy'; 
+  if (/danc|boogie/.test(l)) return 'excited'; 
+  if (/sorry|oops|error|can't|cannot/.test(l)) return 'sad'; 
+  if (/angry|mad/.test(l)) return 'angry'; 
+  return 'neutral';
 }
 
 // ════════════════════════════════════════════════════════
@@ -222,7 +273,6 @@ function detectEmotion(toolCalls, reply) {
 function startGroove() {
   if (grooveTimer || !bleConnected) return;
   let step = 0;
-  // Expanded groove moves (combos of neck and short body turns)
   const grooveMoves = ['V', '1', '2', 'U', '7', '8', '3', '4']; 
   grooveTimer = setInterval(() => {
      if (!isMoving && !isBusy && bleConnected) { bleSend(grooveMoves[step % grooveMoves.length]); step++; }
@@ -254,7 +304,6 @@ async function openYouTube(query, isEntertainment = false) {
               ytPlayer.loadVideoById(vid);
           }
       } else {
-         // Fallback if API didn't load
          document.getElementById('ytPlayerDiv').innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
       }
       
@@ -280,7 +329,7 @@ function closeYouTube() {
   if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
       ytPlayer.stopVideo();
   } else {
-      document.getElementById('ytPlayerDiv').innerHTML = ''; // Fallback clear
+      document.getElementById('ytPlayerDiv').innerHTML = ''; 
   }
   
   document.getElementById('normalControls').style.display = 'flex';
@@ -382,9 +431,27 @@ function speak(text) {
   const theme = localStorage.getItem('petro_theme') || 'default'; let pitch = 1.0, rate = 1.05;
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
   utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
-  const voices = synth.getVoices(), pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+  
+  // Detect Hindi logic
+  const isHindi = /[\u0900-\u097F]/.test(clean);
+  const voices = synth.getVoices();
+  let pref;
+  if (isHindi) {
+      pref = voices.find(v => v.lang.startsWith('hi')) || voices.find(v => v.lang.includes('IN'));
+  } else {
+      pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+  }
   if (pref) utt.voice = pref;
-  utt.onstart = () => { ttsActive = true; updateTTSBtn(); animateMouth(true); }; utt.onend = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); }; utt.onerror = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); };
+  
+  utt.onstart = () => { ttsActive = true; updateTTSBtn(); animateMouth(true); }; 
+  utt.onend = () => { 
+      ttsActive = false; updateTTSBtn(); animateMouth(false); 
+      setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400);
+  }; 
+  utt.onerror = () => { 
+      ttsActive = false; updateTTSBtn(); animateMouth(false); 
+      setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400);
+  };
   synth.speak(utt);
 }
 function stopTTS() { synth?.cancel(); ttsActive = false; updateTTSBtn(); animateMouth(false); }
@@ -402,16 +469,19 @@ function setEyePos(s, x, y) { eyeEls[`${s}Iris`].setAttribute('cx', x); eyeEls[`
 function scheduleBlink() { blinkTimer = setTimeout(() => { doBlink(); scheduleBlink(); }, isSleeping ? 9000 : 2000 + Math.random()*4000); }
 
 const emotions = {
-  neutral:  { irisR:42, pupilR:22, color:'var(--theme-color)', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:0,  tears:false },
-  happy:    { irisR:48, pupilR:26, color:'#22d3a0', lidTopY:-65, lidBotY:142, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:12, tears:false },
-  curious:  { irisR:44, pupilR:24, color:'#3b9eff', lidTopY:-65, lidBotY:200, browW:5, browSlant:5,  mouthType:'small',  mouthOpen:8,  tears:false },
-  excited:  { irisR:52, pupilR:30, color:'#ffd23f', lidTopY:-65, lidBotY:200, browW:0, browSlant:-6, mouthType:'laugh',  mouthOpen:20, tears:true  },
-  sad:      { irisR:30, pupilR:15, color:'#6b8db5', lidTopY:-18, lidBotY:200, browW:8, browSlant:8,  mouthType:'frown',  mouthOpen:0,  tears:true  },
-  angry:    { irisR:36, pupilR:17, color:'#ff5f6d', lidTopY:-24, lidBotY:200, browW:9, browSlant:-9, mouthType:'flat',   mouthOpen:0,  tears:false },
-  focused:  { irisR:38, pupilR:18, color:'#a855f7', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'small',  mouthOpen:0,  tears:false },
-  dizzy:    { irisR:20, pupilR:8,  color:'#ff9800', lidTopY:-65, lidBotY:200, browW:4, browSlant:5,  mouthType:'wiggle', mouthOpen:0,  tears:false },
-  afraid:   { irisR:55, pupilR:10, color:'#ddeeff', lidTopY:-65, lidBotY:200, browW:5, browSlant:8,  mouthType:'small',  mouthOpen:10, tears:false },
-  sleeping: { irisR:7,  pupilR:4,  color:'#3d5470', lidTopY:45,  lidBotY:65,  browW:0, browSlant:0,  mouthType:'sleep',  mouthOpen:0,  tears:false },
+  neutral:   { irisR:42, pupilR:22, color:'var(--theme-color)', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:0,  tears:false },
+  happy:     { irisR:48, pupilR:26, color:'#22d3a0', lidTopY:-65, lidBotY:142, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:12, tears:false },
+  curious:   { irisR:44, pupilR:24, color:'#3b9eff', lidTopY:-65, lidBotY:200, browW:5, browSlant:5,  mouthType:'small',  mouthOpen:8,  tears:false },
+  excited:   { irisR:52, pupilR:30, color:'#ffd23f', lidTopY:-65, lidBotY:200, browW:0, browSlant:-6, mouthType:'laugh',  mouthOpen:20, tears:true  },
+  sad:       { irisR:30, pupilR:15, color:'#6b8db5', lidTopY:-18, lidBotY:200, browW:8, browSlant:8,  mouthType:'frown',  mouthOpen:0,  tears:true  },
+  angry:     { irisR:36, pupilR:17, color:'#ff5f6d', lidTopY:-24, lidBotY:200, browW:9, browSlant:-9, mouthType:'flat',   mouthOpen:0,  tears:false },
+  focused:   { irisR:38, pupilR:18, color:'#a855f7', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'small',  mouthOpen:0,  tears:false },
+  dizzy:     { irisR:20, pupilR:8,  color:'#ff9800', lidTopY:-65, lidBotY:200, browW:4, browSlant:5,  mouthType:'wiggle', mouthOpen:0,  tears:false },
+  afraid:    { irisR:55, pupilR:10, color:'#ddeeff', lidTopY:-65, lidBotY:200, browW:5, browSlant:8,  mouthType:'small',  mouthOpen:10, tears:false },
+  surprised: { irisR:40, pupilR:20, color:'#ff9800', lidTopY:-80, lidBotY:200, browW:6, browSlant:-10,mouthType:'smile',  mouthOpen:20, tears:false },
+  shy:       { irisR:45, pupilR:24, color:'#ff66b2', lidTopY:-20, lidBotY:180, browW:4, browSlant:5,  mouthType:'small',  mouthOpen:0,  tears:false },
+  loving:    { irisR:55, pupilR:28, color:'#ff3366', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:15, tears:false },
+  sleeping:  { irisR:7,  pupilR:4,  color:'#3d5470', lidTopY:45,  lidBotY:65,  browW:0, browSlant:0,  mouthType:'sleep',  mouthOpen:0,  tears:false },
 };
 
 function doBlink() { const em = emotions[currentEmotion] || emotions.neutral; lidAnim(eyeEls.lLidTop, em.lidTopY, 30, 200); lidAnim(eyeEls.rLidTop, em.lidTopY, 30, 200); }
@@ -424,7 +494,7 @@ function setEmotion(name, force = false) {
   if (name !== 'neutral' && name !== 'sleeping') emotionResetTimer = setTimeout(() => setEmotion('neutral'), 5000);
 
   if (bleConnected && !force && name !== 'sleeping') {
-      const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X', curious:'X' };
+      const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X', curious:'X', surprised:'H', shy:'N', loving:'H' };
       if (hwMap[name]) bleSend(hwMap[name]);
   }
 
@@ -452,21 +522,27 @@ function resetInactivity() {
   inactTimer = setTimeout(goToSleep, SLEEP_MS);
   scheduleIdleMove(); 
 }
+
 function scheduleIdleMove() {
   idleMoveTimer = setTimeout(() => {
     if (!isSleeping && !isBusy && bleConnected && !isVideoPlaying) {
-       const idleMoves = ['7', '8', 'E', 'C', 'A', 'V', 'U']; 
-       bleSend(idleMoves[Math.floor(Math.random() * idleMoves.length)]);
+       // Occasional physical wander vs smaller moves
+       if (Math.random() > 0.85) {
+           doWander(); 
+       } else {
+           const idleMoves = ['7', '8', 'E', 'C', 'A', 'V', 'U']; 
+           bleSend(idleMoves[Math.floor(Math.random() * idleMoves.length)]);
+       }
        
-       // Inject random mild emotion while idling
        if (Math.random() > 0.5) {
-           const idleEmotions = ['happy', 'focused', 'curious', 'neutral'];
+           const idleEmotions = ['happy', 'focused', 'curious', 'neutral', 'shy', 'loving'];
            setEmotion(idleEmotions[Math.floor(Math.random() * idleEmotions.length)]);
        }
     }
     scheduleIdleMove();
   }, 10000 + Math.random() * 15000); 
 }
+
 ['click','keydown','touchstart'].forEach(e => document.addEventListener(e, resetInactivity, {passive:true}));
 
 function appendMsg(role, text, actions = []) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : 'petRO 🤖'; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; el.append(lbl, bub); if (actions?.length) { const chip = document.createElement('div'); chip.className = 'actions-chip'; chip.textContent = '⚡ ' + actions.join(' · '); el.append(chip); } c.append(el); c.scrollTop = c.scrollHeight; }
@@ -474,7 +550,7 @@ function showTyping() { const c=document.getElementById('messages'),el=document.
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
 
-// ── NEW: EARS VISUAL OVERLAY FOR MIC ──
+// ── EARS VISUAL OVERLAY FOR MIC ──
 function toggleThemeEars(show) {
   const tId = document.getElementById('themeSelect').value || 'default';
   const group = document.getElementById('earsGroup');
@@ -486,10 +562,8 @@ function toggleThemeEars(show) {
       return; 
   }
   
-  // Hide all ear types first
   document.querySelectorAll('.ear-theme').forEach(el => el.style.display = 'none');
   
-  // Show specific ear
   if (tId === 'dog') document.querySelector('.ear-dog').style.display = 'block';
   else if (tId === 'monkey') document.querySelector('.ear-monkey').style.display = 'block';
   else if (tId === 'terminator' || tId === 'transformer') document.querySelector('.ear-terminator').style.display = 'block';
@@ -527,6 +601,54 @@ function listenForCommand() {
     cmdRecog.onend = () => { if(micState==='cmd'){hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400);} }; 
     try{cmdRecog.start();}catch{hideWakeOverlay(); micState='wake'; startBgListen();} 
 }
+
+// ── FOLLOW UP WINDOW ──
+function startFollowUp() {
+  if (!alwaysOnMic || isVideoPlaying) return;
+  const dur = parseInt(document.getElementById('followUpSelect').value || '0', 10);
+  if (dur === 0) return;
+
+  followUpActive = true;
+  showWakeOverlay();
+  const sub = document.getElementById('listeningStatus');
+  sub.textContent = 'Awaiting follow-up...';
+  
+  micState = 'cmd'; 
+  updateMicBadge('cmd'); 
+  
+  try { cmdRecog?.abort(); } catch {}
+  cmdRecog = new SR(); 
+  cmdRecog.continuous = false; 
+  cmdRecog.interimResults = true; 
+  
+  cmdRecog.onresult = e => { 
+      const last = e.results[e.results.length-1]; const t = last[0].transcript; 
+      if(last.isFinal){ 
+          clearTimeout(followUpTimeout); followUpActive = false;
+          sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; 
+          document.getElementById('userInput').value=t; appendMsg('user',t); doChat(t); 
+      } else { sub.textContent=t+'…'; } 
+  }; 
+  
+  cmdRecog.onerror = (e) => { 
+      if(followUpActive && e.error !== 'aborted') { try{cmdRecog.start();}catch{} } 
+  }; 
+  cmdRecog.onend = () => { 
+      if(followUpActive) { try{cmdRecog.start();}catch{} } 
+  }; 
+  
+  try { cmdRecog.start(); } catch { followUpActive = false; hideWakeOverlay(); micState='wake'; startBgListen(); }
+
+  clearTimeout(followUpTimeout);
+  followUpTimeout = setTimeout(() => {
+      followUpActive = false;
+      try { cmdRecog.abort(); } catch {}
+      hideWakeOverlay(); 
+      micState = 'wake'; 
+      startBgListen();
+  }, dur);
+}
+
 function cancelWake() { try{cmdRecog?.abort();}catch{} hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,300); }
 function showWakeOverlay() { toggleThemeEars(true); updateMicBadge('cmd'); }
 function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
