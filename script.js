@@ -3,11 +3,11 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
-const SLEEP_MS    = 5 * 60 * 1000; 
+const WAKE_WORDS   = ['ok petro','okay petro','hey petro'];
+const SLEEP_MS     = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
-const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-const YT_API_KEY  = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
+const GEMINI_URL   = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const YT_API_KEY = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
 
 const BLE_SERVICE  = '00001234-0000-1000-8000-00805f9b34fb';
 const BLE_CMD_CHAR = '00005678-0000-1000-8000-00805f9b34fb';
@@ -28,7 +28,7 @@ const THEMES = {
 };
 
 // ════════════════════════════════════════════════════════
-// STATE MANAGEMENT
+// STATE
 // ════════════════════════════════════════════════════════
 let bleDevice = null, bleCmdChar = null, bleConnected = false, isBusy = false;
 let currentEmotion = 'neutral', emotionResetTimer = null; 
@@ -39,170 +39,116 @@ let videoStream = null, currentUploadedImage = null;
 let ttsActive = false, mouthTalkAnim = null, toastTimer = null;
 let chatHistory = [], motionEnabled = false;
 
-let isVideoPlaying = false, micSuspendedForVideo = false;
+let isVideoPlaying = false, micSuspendedForVideo = false, grooveTimer = null;
 let hardwareActive = false, hwTimeout = null;
 let followUpActive = false, followUpTimeout = null;
+
+// Bluetooth Stability Controls
+let bleKeepAliveInterval = null;
+let writeQueue = Promise.resolve();
+let userIntentionalDisconnect = false;
 
 // YouTube API variables
 let ytPlayer = null;
 let isYtApiReady = false;
-
-// Global safety emotional matrices fallback
-if (typeof emotions === 'undefined') {
-  window.emotions = { 
-    neutral: { mouthType: 'line', mouthOpen: 0 },
-    happy: { mouthType: 'smile', mouthOpen: 5 },
-    sad: { mouthType: 'frown', mouthOpen: 0 },
-    excited: { mouthType: 'smile', mouthOpen: 15 },
-    focused: { mouthType: 'line', mouthOpen: 2 },
-    dizzy: { mouthType: 'circle', mouthOpen: 10 },
-    afraid: { mouthType: 'circle', mouthOpen: 12 },
-    loving: { mouthType: 'smile', mouthOpen: 5 },
-    surprised: { mouthType: 'circle', mouthOpen: 20 },
-    shy: { mouthType: 'line', mouthOpen: 0 },
-    angry: { mouthType: 'frown', mouthOpen: 5 }
-  };
-}
-
-// ════════════════════════════════════════════════════════
-// RUNTIME RUN-SHIELD STUBS (Guarantees Page Interactivity)
-// ════════════════════════════════════════════════════════
-if (typeof toast !== 'function') window.toast = str => console.log("Toast:", str);
-if (typeof appendMsg !== 'function') window.appendMsg = (r, t) => console.log(`[${r}]: ${t}`);
-if (typeof showTyping !== 'function') window.showTyping = () => null;
-if (typeof removeTyping !== 'function') window.removeTyping = () => {};
-if (typeof setEmotion !== 'function') window.setEmotion = (e) => { currentEmotion = e; };
-if (typeof applyMouthForEmotion !== 'function') window.applyMouthForEmotion = () => {};
-if (typeof setMouthPath !== 'function') window.setMouthPath = () => {};
-if (typeof startFollowUp !== 'function') window.startFollowUp = () => {};
-if (typeof stopAllRecog !== 'function') window.stopAllRecog = () => {};
-if (typeof startBgListen !== 'function') window.startBgListen = () => {};
-if (typeof updateMicBadge !== 'function') window.updateMicBadge = () => {};
-if (typeof resetInactivity !== 'function') window.resetInactivity = () => {};
 
 window.onYouTubeIframeAPIReady = function() {
   isYtApiReady = true;
 };
 
 // ════════════════════════════════════════════════════════
-// FULLSCREEN & API, THEME LOGIC
+// FULLSCREEN & API, THEME & USAGE LOGIC
 // ════════════════════════════════════════════════════════
 async function toggleFullscreen() {
   if (!document.fullscreenElement) { 
     try { 
       await document.documentElement.requestFullscreen(); 
       if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); 
-    } catch(e) { 
-      toast('⚠️ Fullscreen not supported'); 
-    }
+    } catch(e) { toast('⚠️ Fullscreen not supported'); }
   } else { 
-    try { 
-      await document.exitFullscreen(); 
-      if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); 
-    } catch(e) {} 
+    try { await document.exitFullscreen(); if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e) {} 
   }
 }
 
 function getApiKey() { return localStorage.getItem('petro_gemini_key') || ''; }
-
-function saveApiKey() { 
-  const input = document.getElementById('apiKeyInput');
-  if (!input) return;
-  const v = input.value.trim(); 
-  if (!v) { toast('⚠️ Paste key'); return; } 
-  localStorage.setItem('petro_gemini_key', v); 
-  updateKeyBadge(); 
-  toast('✅ Key saved!'); 
-  closeSettings(); 
-}
-
-function clearApiKey() { 
-  localStorage.removeItem('petro_gemini_key'); 
-  const input = document.getElementById('apiKeyInput');
-  if (input) input.value = ''; 
-  updateKeyBadge(); 
-  toast('🗑 Key removed'); 
-}
-
-function updateKeyBadge() { 
-  const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); 
-  if (k) { 
-    if(b) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; } 
-    if(s) { s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } 
-  } else { 
-    if(b) { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; } 
-    if(s) { s.className = 'key-status bad'; s.textContent = 'No key saved'; } 
-  } 
-}
-
-function toggleKeyVisibility() { 
-  const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); 
-  if (!inp || !btn) return;
-  if (inp.type === 'password') { 
-    inp.type = 'text'; btn.textContent = '🙈'; 
-  } else { 
-    inp.type = 'password'; btn.textContent = '👁'; 
-  } 
-}
+function saveApiKey() { const v = document.getElementById('apiKeyInput').value.trim(); if (!v) { toast('⚠️ Paste key'); return; } localStorage.setItem('petro_gemini_key', v); updateKeyBadge(); toast('✅ Key saved!'); closeSettings(); }
+function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.getElementById('apiKeyInput').value = ''; updateKeyBadge(); updateKeyBadge(); toast('🗑 Key removed'); }
+function updateKeyBadge() { const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); if (k) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } else { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; s.className = 'key-status bad'; s.textContent = 'No key saved'; } }
+function toggleKeyVisibility() { const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; } else { inp.type = 'password'; btn.textContent = '👁'; } }
 
 function loadPersonalization() { 
-  const userIn = document.getElementById('userNameInput'); if (userIn) userIn.value = localStorage.getItem('petro_user_name') || ''; 
-  const themeSel = document.getElementById('themeSelect'); if (themeSel) themeSel.value = localStorage.getItem('petro_theme') || 'default'; 
-  const followSel = document.getElementById('followUpSelect'); if (followSel) followSel.value = localStorage.getItem('petro_followup') || '0';
+  document.getElementById('userNameInput').value = localStorage.getItem('petro_user_name') || ''; 
+  document.getElementById('themeSelect').value = localStorage.getItem('petro_theme') || 'default'; 
+  document.getElementById('followUpSelect').value = localStorage.getItem('petro_followup') || '0';
   applyTheme(); 
 }
 
 function savePersonalization() { 
-  const userIn = document.getElementById('userNameInput');
-  const themeSel = document.getElementById('themeSelect');
-  const followSel = document.getElementById('followUpSelect');
-  if(userIn) localStorage.setItem('petro_user_name', userIn.value.trim()); 
-  if(themeSel) localStorage.setItem('petro_theme', themeSel.value); 
-  if(followSel) localStorage.setItem('petro_followup', followSel.value);
+  localStorage.setItem('petro_user_name', document.getElementById('userNameInput').value.trim()); 
+  localStorage.setItem('petro_theme', document.getElementById('themeSelect').value); 
+  localStorage.setItem('petro_followup', document.getElementById('followUpSelect').value);
   applyTheme(); toast('✅ Saved!'); 
 }
 
 function applyTheme() {
-  const themeSel = document.getElementById('themeSelect');
-  const tId = (themeSel && themeSel.value) || 'default', t = THEMES[tId], root = document.documentElement;
+  const tId = document.getElementById('themeSelect').value || 'default', t = THEMES[tId], root = document.documentElement;
   root.style.setProperty('--theme-color', t.color); root.style.setProperty('--bg', t.bg); root.style.setProperty('--surface', t.surface); root.style.setProperty('--card', t.card);
+  document.getElementById('stop1-2').setAttribute('stop-color', t.color); document.getElementById('stop2-2').setAttribute('stop-color', t.color);
+  document.getElementById('lGlow').setAttribute('stroke', t.color); document.getElementById('rGlow').setAttribute('stroke', t.color);
   
-  const s1 = document.getElementById('stop1-2'); if(s1) s1.setAttribute('stop-color', t.color);
-  const s2 = document.getElementById('stop2-2'); if(s2) s2.setAttribute('stop-color', t.color);
-  const lg = document.getElementById('lGlow'); if(lg) lg.setAttribute('stroke', t.color);
-  const rg = document.getElementById('rGlow'); if(rg) rg.setAttribute('stroke', t.color);
-  
+  ['dog', 'terminator', 'monkey', 'starwars', 'transformer'].forEach(a => { const el = document.getElementById('theme-' + a); if (el) el.style.opacity = (tId === a) ? '1' : '0'; });
+  const mg = document.getElementById('mouthGroup'), mr = document.getElementById('mouthRim');
+  if (tId === 'transformer') { mg.style.opacity = '0'; mr.style.opacity = '0'; } else { mg.style.opacity = '1'; mr.style.opacity = '1'; }
   if (currentEmotion === 'neutral') setEmotion('neutral', true);
 }
 
 function openSettings() { 
-  const k = getApiKey(); 
-  if (k && document.getElementById('apiKeyInput')) document.getElementById('apiKeyInput').value = k; 
-  const sm = document.getElementById('settingsModal'); 
-  if (sm) sm.classList.add('open'); 
-  updateKeyBadge(); updateMemoryPill();
+  const k = getApiKey(); if (k) document.getElementById('apiKeyInput').value = k; 
+  document.getElementById('settingsModal').classList.add('open'); 
+  updateKeyBadge(); updateBleInfoBox(); updateMemoryPill(); updateUsageUI();
 }
-function closeSettings() { const sm = document.getElementById('settingsModal'); if (sm) sm.classList.remove('open'); }
+function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
+document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
+
+function trackUsage(inTokens, outTokens) {
+    let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    usage.in += inTokens; usage.out += outTokens; usage.req += 1;
+    localStorage.setItem('petro_usage', JSON.stringify(usage));
+    updateUsageUI();
+}
+
+function updateUsageUI() {
+    const el = document.getElementById('usageBox'); if (!el) return;
+    let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    const cost = ((usage.in / 1000000) * 0.075) + ((usage.out / 1000000) * 0.30);
+    el.innerHTML = `Requests: <b>${usage.req}</b><br>Tokens: <b>${usage.in.toLocaleString()}</b> In / <b>${usage.out.toLocaleString()}</b> Out<br>Est. Cost: <b>$${cost.toFixed(5)}</b>`;
+}
+
+function clearUsage() { localStorage.removeItem('petro_usage'); updateUsageUI(); toast('🗑 Usage reset'); }
 
 // ════════════════════════════════════════════════════════
-// BLUETOOTH CONTROL
+// STABLE BLUETOOTH LAYER
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
   if (!navigator.bluetooth) { toast('❌ Web Bluetooth not supported.'); return; }
   setBLE(null); toast('🔍 Scanning…');
+  userIntentionalDisconnect = false;
   try { 
     bleDevice = await navigator.bluetooth.requestDevice({ filters: [{ name: BLE_NAME }], optionalServices: [BLE_SERVICE] }); 
   } catch(e1) { 
     if (e1.name === 'AbortError') { setBLE(false); return; } 
     try { 
       bleDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE] }); 
-    } catch(e2) { 
-      setBLE(false); toast('❌ No BLE devices found.'); return; 
-    } 
+    } catch(e2) { setBLE(false); toast('❌ No BLE devices found.'); return; } 
   }
   
   bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
+  await establishGATTConnection();
+}
+
+async function establishGATTConnection() {
+  if (!bleDevice) return;
   toast(`🔗 Connecting to ${bleDevice.name}…`);
   try { 
     const server = await bleDevice.gatt.connect(); 
@@ -210,54 +156,101 @@ async function toggleBLE() {
     bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); 
     setBLE(true); 
     toast(`✅ Connected!`); 
-    resetInactivity(); 
+    updateBleInfoBox(); 
+    resetInactivity();
+    startKeepAlive();
   } catch(e) { 
-    setBLE(false); bleDevice = null; toast('❌ Connection failed.'); 
+    setBLE(false); 
+    bleDevice = null; 
+    toast('❌ Connection failed.'); 
+    stopKeepAlive();
   }
 }
 
 function disconnectBLE() { 
+  userIntentionalDisconnect = true;
+  stopKeepAlive();
   try { bleDevice?.gatt?.disconnect(); } catch {} 
-  bleDevice = null; bleCmdChar = null; setBLE(false); toast('Disconnected'); 
-}
-
-function onBleDisconnect() { 
-  if (!bleConnected) return; 
-  setBLE(false); 
-  toast('⚠️ petRO disconnected.'); 
+  bleDevice = null; 
   bleCmdChar = null; 
+  setBLE(false); 
+  toast('Disconnected'); 
+  updateBleInfoBox(); 
 }
 
-function setBLE(s) { 
-  const b = document.getElementById('bleBtn'); if(!b) return;
-  if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } 
-  else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } 
-  else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } 
-  bleConnected = !!s; 
+async function onBleDisconnect() { 
+  stopKeepAlive();
+  if (userIntentionalDisconnect) { setBLE(false); updateBleInfoBox(); return; }
+  setBLE(null); 
+  toast('⚠️ Lost connection. Reconnecting…');
+  
+  // Exponential backoff auto-reconnection loop
+  let retries = 3;
+  while (retries > 0 && !bleConnected) {
+    try {
+      await sleep(2000);
+      if (bleDevice) {
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE);
+        bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
+        setBLE(true);
+        toast(`✅ Reconnected!`);
+        updateBleInfoBox();
+        startKeepAlive();
+        return;
+      }
+    } catch (e) {
+      retries--;
+      console.warn(`Reconnection failed. Retries remaining: ${retries}`);
+    }
+  }
+  setBLE(false);
+  bleCmdChar = null;
+  updateBleInfoBox();
+  toast('❌ Could not reconnect to petRO.');
 }
 
-async function bleSend(cmd) {
-  if (!bleCmdChar) return;
+function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
+function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; }
+
+function startKeepAlive() {
+  stopKeepAlive();
+  // Ping peripheral firmware every 15 seconds of hardware idleness to prevent GATT timeout drops
+  bleKeepAliveInterval = setInterval(() => {
+    if (bleConnected && !hardwareActive && !isMoving) {
+      bleSend('S'); 
+    }
+  }, 15000);
+}
+
+function stopKeepAlive() { if (bleKeepAliveInterval) { clearInterval(bleKeepAliveInterval); bleKeepAliveInterval = null; } }
+
+function bleSend(cmd) {
+  if (!bleCmdChar || !bleConnected) return;
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
   hwTimeout = setTimeout(() => hardwareActive = false, 3000);
 
-  if (!bleDevice?.gatt?.connected) { 
-    try { 
-      const server = await bleDevice.gatt.connect(); 
-      const service = await server.getPrimaryService(BLE_SERVICE); 
-      bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); 
-      setBLE(true); 
-    } catch(e) { 
-      setBLE(false); return; 
-    } 
-  }
-  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; }
+  // Serialize packets using sequential sequencing to prevent frame drops
+  writeQueue = writeQueue.then(async () => {
+    try {
+      if (!bleDevice?.gatt?.connected) {
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE);
+        bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
+      }
+      await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd));
+    } catch(e) {
+      console.error("BLE Write error caught safely:", e);
+    }
+  });
+  return writeQueue;
 }
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ════════════════════════════════════════════════════════
-// HARDWARE ACTIONS
+// DIRECT MOVEMENT & HARDWARE ACTIONS
 // ════════════════════════════════════════════════════════
 let isMoving = false;
 async function startDirectMove(cmd) { if (!bleConnected) { toast('⚠️ Connect BLE first!'); return; } resetInactivity(); isMoving = true; await bleSend(cmd); }
@@ -272,12 +265,12 @@ async function doDance() { toast('💃 Dancing!'); setEmotion('excited'); for (c
 async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); await bleSend('W'); await sleep(4000); toast('✅ Done'); }
 
 // ════════════════════════════════════════════════════════
-// MOTION ENGINE
+// MOTION SENSORS
 // ════════════════════════════════════════════════════════
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); const gb = document.getElementById('gyroBtn'); if(gb) gb.style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
-  } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); const gb = document.getElementById('gyroBtn'); if(gb) gb.style.display='none'; }
+    DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
+  } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; }
 }
 let lastAccel = 0;
 function bindSensors() {
@@ -295,7 +288,7 @@ function bindSensors() {
 }
 
 // ════════════════════════════════════════════════════════
-// GEMINI API AGENT
+// GEMINI AGENT
 // ════════════════════════════════════════════════════════
 function buildSystemPrompt() {
   const uName = localStorage.getItem('petro_user_name') || ''; const theme = THEMES[localStorage.getItem('petro_theme') || 'default'];
@@ -307,8 +300,10 @@ AVAILABLE FUNCTIONS:
   nod_head(times) -> nods head
   wander() -> wanders around
   capture_photo() -> take a picture
-  search_youtube(query) -> play video
+  search_youtube(query, is_entertainment) -> play video. Set is_entertainment to true if query is music/dance to trigger a slow groove.
   call_contact(num) -> call phone
+  show_prop(prop_name) -> Displays visual prop on UI ('apple', 'book', 'dumbbell', 'laptop'). USE THIS if user mentions eating, studying, working out, or coding/working.
+  perform_pattern(pattern) -> Executes special movement ('circle', 'rectangle', 'moonwalk', 'spin'). Use if asked to draw shape or dance specifically.
 
 EMOTION HARDWARE TRIGGERING: Append [emotion:NAME] (e.g. [emotion:happy], [emotion:sad], [emotion:focused]) to physically trigger C++ macro routines!`;
   return p;
@@ -324,8 +319,10 @@ const TOOL_DECLARATIONS = [
   { name:'nod_head', parameters:{type:'OBJECT',properties:{ times: {type: 'INTEGER'} }} },
   { name:'wander', parameters:{type:'OBJECT',properties:{}} },
   { name:'capture_photo', parameters:{type:'OBJECT',properties:{}} },
-  { name:'search_youtube', parameters:{type:'OBJECT',properties:{query:{type:'STRING'}},required:['query']} },
-  { name:'call_contact', parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING'} }, required:['phone_number']} }
+  { name:'search_youtube', parameters:{type:'OBJECT',properties:{query:{type:'STRING'}, is_entertainment:{type:'BOOLEAN', description: 'true if music/dance/entertainment'}},required:['query']} },
+  { name:'call_contact', parameters:{type:'OBJECT',properties:{ phone_number: {type: 'STRING'} }, required:['phone_number']} },
+  { name:'show_prop', parameters:{type:'OBJECT',properties:{ prop_name: {type: 'STRING', description: 'apple, book, dumbbell, or laptop'} }, required:['prop_name']} },
+  { name:'perform_pattern', parameters:{type:'OBJECT',properties:{ pattern: {type: 'STRING', description: 'circle, rectangle, moonwalk, spin'} }, required:['pattern']} }
 ];
 
 async function callGemini(userText, imageDataUrl = null) {
@@ -339,6 +336,8 @@ async function callGemini(userText, imageDataUrl = null) {
   if (!resp.ok) { const err = await resp.json().catch(() => ({})); const msg = err?.error?.message || `HTTP ${resp.status}`; if (resp.status === 400 && msg.includes('API_KEY')) throw new Error('Invalid API key'); throw new Error(msg); }
   const data = await resp.json(); 
   
+  if (data.usageMetadata) { trackUsage(data.usageMetadata.promptTokenCount || 0, data.usageMetadata.candidatesTokenCount || 0); }
+
   const parts = data?.candidates?.[0]?.content?.parts || [];
   let replyText = ''; const toolCalls = [];
 
@@ -365,9 +364,20 @@ function detectEmotion(toolCalls, reply) {
 }
 
 // ════════════════════════════════════════════════════════
-// YOUTUBE FRAME OPERATIONS
+// YOUTUBE, GROOVE & PROPS
 // ════════════════════════════════════════════════════════
-async function openYouTube(query) {
+function startGroove() {
+  if (grooveTimer || !bleConnected) return;
+  let step = 0;
+  const grooveMoves = ['V', '1', '2', 'U', '7', '8', '3', '4']; 
+  grooveTimer = setInterval(() => {
+     if (!isMoving && !isBusy && bleConnected) { bleSend(grooveMoves[step % grooveMoves.length]); step++; }
+  }, 1800);
+}
+
+function stopGroove() { clearInterval(grooveTimer); grooveTimer = null; if (bleConnected) bleSend('E'); }
+
+async function openYouTube(query, isEntertainment = false) {
   toast(`🔍 Searching YouTube for "${query}"...`);
   try {
     const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q=${encodeURIComponent(query)}&type=video&key=${YT_API_KEY}`);
@@ -375,7 +385,9 @@ async function openYouTube(query) {
     if (data.items && data.items.length > 0) {
       const vid = data.items[0].id.videoId;
       
-      const ytc = document.getElementById('ytContainer'); if(ytc) ytc.style.display = 'flex';
+      document.getElementById('ytContainer').style.display = 'flex';
+      document.getElementById('normalControls').style.display = 'none';
+      document.getElementById('miniPetroArea').style.display = 'flex';
       
       if (isYtApiReady) {
           if (!ytPlayer) {
@@ -388,43 +400,45 @@ async function openYouTube(query) {
               ytPlayer.loadVideoById(vid);
           }
       } else {
-         const ytpDiv = document.getElementById('ytPlayerDiv'); if(ytpDiv) ytpDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
+         document.getElementById('ytPlayerDiv').innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
       }
       
       appendMsg('bot', `Now Playing. If video gets stuck, watch here: https://youtube.com/watch?v=${vid}`);
       
       isVideoPlaying = true;
       if (alwaysOnMic) { stopAllRecog(); micSuspendedForVideo = true; toast('🎤 Mic paused for media'); }
-
+      if (isEntertainment || query.toLowerCase().includes('music') || query.toLowerCase().includes('dance')) { startGroove(); }
     } else { toast('❌ No video found.'); }
   } catch (error) { toast('❌ YouTube search failed.'); }
 }
 
-function onPlayerStateChange(event) {
-    if (event.data == YT.PlayerState.ENDED) {
-        closeYouTube();
-    }
-}
+function onPlayerStateChange(event) { if (event.data == YT.PlayerState.ENDED) { closeYouTube(); } }
 
 function closeYouTube() { 
-  const ytc = document.getElementById('ytContainer'); if(ytc) ytc.style.display = 'none'; 
-  
-  if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
-      ytPlayer.stopVideo();
-  } else {
-      const ytpDiv = document.getElementById('ytPlayerDiv'); if(ytpDiv) ytpDiv.innerHTML = ''; 
-  }
-  
-  isVideoPlaying = false;
-  
-  if (micSuspendedForVideo) {
-      alwaysOnMic = true; startBgListen(); updateMicBadge('wake'); 
-      micSuspendedForVideo = false; toast('🎤 Mic resumed');
-  }
+  document.getElementById('ytContainer').style.display = 'none'; 
+  if (ytPlayer && typeof ytPlayer.stopVideo === 'function') { ytPlayer.stopVideo(); } else { document.getElementById('ytPlayerDiv').innerHTML = ''; }
+  document.getElementById('normalControls').style.display = 'flex';
+  document.getElementById('miniPetroArea').style.display = 'none';
+  isVideoPlaying = false; stopGroove();
+  if (micSuspendedForVideo) { alwaysOnMic = true; startBgListen(); updateMicBadge('wake'); micSuspendedForVideo = false; toast('🎤 Mic resumed'); }
+}
+
+function showProp(propName) {
+  document.querySelectorAll('.prop-item').forEach(el => el.style.opacity = '0');
+  const el = document.getElementById('prop-' + propName);
+  if (el) { el.style.opacity = '1'; setTimeout(() => { el.style.opacity = '0'; }, 5000); }
+}
+
+async function doPattern(pattern) {
+  toast(`Executing ${pattern}!`); if (!bleConnected) return;
+  if (pattern === 'circle') { await bleSend('L'); await sleep(3500); await bleSend('S'); } 
+  else if (pattern === 'rectangle') { for (let i=0; i<4; i++) { await bleSend('F'); await sleep(1000); await bleSend('R'); await sleep(600); } await bleSend('S'); } 
+  else if (pattern === 'moonwalk') { for (let i=0; i<4; i++) { await bleSend('B'); await sleep(500); await bleSend('S'); await sleep(200); } } 
+  else if (pattern === 'spin') { await bleSend('L'); await sleep(1500); await bleSend('S'); }
 }
 
 // ════════════════════════════════════════════════════════
-// APPARATUS FUNCTIONS DISPATCHER
+// TOOL EXECUTION
 // ════════════════════════════════════════════════════════
 async function executeTools(toolCalls) {
   for (const tc of toolCalls) {
@@ -439,145 +453,145 @@ async function executeTools(toolCalls) {
       case 'nod_head':      for (let i = 0; i < (args.times || 1); i++) { await doAction('nod'); } break;
       case 'wander':        await doWander(); break;
       case 'capture_photo': autoCapture(); break;
-      case 'search_youtube':if (args.query) await openYouTube(args.query); break;
+      case 'search_youtube':if (args.query) await openYouTube(args.query, args.is_entertainment); break;
       case 'call_contact':  if (args.phone_number) { toast(`📞 Calling...`); window.location.href = `tel:${args.phone_number}`; } break;
+      case 'show_prop':     if (args.prop_name) showProp(args.prop_name); break;
+      case 'perform_pattern':if(args.pattern) await doPattern(args.pattern); break;
     }
   }
 }
 
 // ════════════════════════════════════════════════════════
-// MESSAGING PIPELINE
+// CHAT FLOW
 // ════════════════════════════════════════════════════════
 async function sendChat() {
-  const inp = document.getElementById('userInput'); if(!inp) return;
-  const text = inp.value.trim();
+  const inp = document.getElementById('userInput'), text = inp.value.trim();
   if (!text || isBusy) return; inp.value = ''; resetInactivity();
   let attachedImage = currentUploadedImage || null; currentUploadedImage = null; updateUploadPreview();
   const visionKw = ['what am i holding','look at me','what is this','see this'];
   if (!attachedImage && visionKw.some(kw => text.toLowerCase().includes(kw))) { attachedImage = captureSnapshot(); if (attachedImage) { appendImageMsg('user', attachedImage); toast('📸 Auto-captured!'); } } else if (attachedImage) { appendImageMsg('user', attachedImage); }
   appendMsg('user', text); await doChat(text, attachedImage);
 }
-function sendSug(t) { const ui = document.getElementById('userInput'); if(ui) ui.value = t; sendChat(); }
+function sendSug(t) { document.getElementById('userInput').value = t; sendChat(); }
 async function doChat(userText, imageDataUrl = null) {
-  isBusy = true; const sb = document.getElementById('sendBtn'); if(sb) sb.disabled = true; const typEl = showTyping();
+  isBusy = true; document.getElementById('sendBtn').disabled = true; const typEl = showTyping();
   try {
     const { reply, emotion, toolCalls } = await callGemini(userText, imageDataUrl); removeTyping(typEl);
     appendMsg('bot', reply, toolCalls.map(t => t.name)); setEmotion(emotion); speak(reply);
     addToHistory('user', userText, imageDataUrl); addToHistory('model', reply); await executeTools(toolCalls);
-  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; if(sb) sb.disabled = false; }
+  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
 }
 function addToHistory(role, text, imageBase64 = null) { chatHistory.push({ role, text, imageBase64 }); if (chatHistory.length > MAX_HISTORY) chatHistory.splice(0, chatHistory.length - MAX_HISTORY); try { sessionStorage.setItem('petro_history', JSON.stringify(chatHistory.map(m => ({...m, imageBase64: null})))); } catch {} updateMemoryPill(); }
 function loadHistory() { try { const saved = sessionStorage.getItem('petro_history'); if (saved) chatHistory = JSON.parse(saved); } catch {} }
-function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_history'); } catch {} const msgs = document.getElementById('messages'); if(msgs) msgs.innerHTML = `<div class="msg bot"><div class="msg-label">petRO 🤖</div><div class="msg-bubble">Fresh start! ✨</div></div>`; toast('Chat cleared'); updateMemoryPill(); }
-function updateMemoryPill() { const mp = document.getElementById('memoryPill'); if(mp) mp.textContent = `Memory: ${chatHistory.length} / ${MAX_HISTORY} msgs`; }
+function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_history'); } catch {} document.getElementById('messages').innerHTML = `<div class="msg bot"><div class="msg-label">petRO 🤖</div><div class="msg-bubble">Fresh start! ✨</div></div>`; toast('Chat cleared'); updateMemoryPill(); }
+function updateMemoryPill() { document.getElementById('memoryPill').textContent = `Memory: ${chatHistory.length} / ${MAX_HISTORY} msgs`; }
 
 // ════════════════════════════════════════════════════════
-// OPTICAL HARDWARE (CAMERA Snapshots)
+// CAMERA
 // ════════════════════════════════════════════════════════
-async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); const wv = document.getElementById('webcamView'); if(wv) wv.srcObject = videoStream; } catch(e) { console.warn('Camera unavailable:', e); } }
+async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); document.getElementById('webcamView').srcObject = videoStream; } catch(e) { console.warn('Camera unavailable:', e); } }
 function captureSnapshot() { const video = document.getElementById('webcamView'), canvas = document.getElementById('captureCanvas'); if (!video || !canvas || !videoStream) return null; const ctx = canvas.getContext('2d'); canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480; ctx.drawImage(video, 0, 0, canvas.width, canvas.height); return canvas.toDataURL('image/jpeg', 0.85); }
 function triggerFlash() { const f = document.createElement('div'); Object.assign(f.style, { position:'fixed', inset:'0', background:'#fff', zIndex:'9999', opacity:'1', transition:'opacity 0.4s ease' }); document.body.appendChild(f); setTimeout(() => { f.style.opacity = '0'; setTimeout(() => f.remove(), 400); }, 50); }
 function manualCapture() { const dataUrl = captureSnapshot(); if (dataUrl) { appendImageMsg('user', dataUrl); toast('📸 Captured!'); } }
 function autoCapture() { triggerFlash(); setTimeout(() => { const dataUrl = captureSnapshot(); if (dataUrl) { appendImageMsg('bot', dataUrl); doChat('Describe in detail what you see in this photo!', dataUrl); toast('📸 Snap!'); } }, 120); }
 function handleFileUpload(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { currentUploadedImage = ev.target.result; updateUploadPreview(); }; reader.readAsDataURL(file); }
-function clearUploadedImage() { currentUploadedImage = null; const fi = document.getElementById('fileInput'); if(fi) fi.value = ''; updateUploadPreview(); }
-function updateUploadPreview() { const bar = document.getElementById('uploadPreviewBar'), img = document.getElementById('previewImg'); if(!bar || !img) return; if (currentUploadedImage) { img.src = currentUploadedImage; bar.style.display = 'flex'; } else { bar.style.display = 'none'; img.src = ''; } }
-function appendImageMsg(role, dataUrl) { const c = document.getElementById('messages'); if(!c) return; const el = document.createElement('div'); el.className = `msg ${role}`; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.style.padding = '4px'; const img = document.createElement('img'); img.src = dataUrl; img.style.cssText = 'max-width:100%;border-radius:10px;display:block;'; bub.appendChild(img); el.appendChild(bub); c.appendChild(el); c.scrollTop = c.scrollHeight; }
+function clearUploadedImage() { currentUploadedImage = null; document.getElementById('fileInput').value = ''; updateUploadPreview(); }
+function updateUploadPreview() { const bar = document.getElementById('uploadPreviewBar'), img = document.getElementById('previewImg'); if (currentUploadedImage) { img.src = currentUploadedImage; bar.style.display = 'flex'; } else { bar.style.display = 'none'; img.src = ''; } }
+function appendImageMsg(role, dataUrl) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.style.padding = '4px'; const img = document.createElement('img'); img.src = dataUrl; img.style.cssText = 'max-width:100%;border-radius:10px;display:block;'; bub.appendChild(img); el.appendChild(bub); c.appendChild(el); c.scrollTop = c.scrollHeight; }
 
 // ════════════════════════════════════════════════════════
-// TTS TEXT-TO-SPEECH
+// TTS
 // ════════════════════════════════════════════════════════
 const synth = window.speechSynthesis;
 function speak(text) {
   if (!synth || isVideoPlaying) return; 
   synth.cancel(); const clean = text.replace(/\p{Emoji}/gu, '').replace(/\[emotion:\w+\]/gi, '').trim(); if (!clean) return;
-  const utt = new SpeechSynthesisUtterance(clean);
+  const sampleUtt = new SpeechSynthesisUtterance(clean);
   const theme = localStorage.getItem('petro_theme') || 'default'; let pitch = 1.0, rate = 1.05;
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
-  utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
+  sampleUtt.pitch = pitch; sampleUtt.rate = rate; sampleUtt.volume = 1;
   
   const isHindi = /[\u0900-\u097F]/.test(clean);
   const voices = synth.getVoices();
   let pref;
-  if (isHindi) {
-      pref = voices.find(v => v.lang.startsWith('hi')) || voices.find(v => v.lang.includes('IN'));
-  } else {
-      pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0];
-  }
-  if (pref) utt.voice = pref;
+  if (isHindi) { pref = voices.find(v => v.lang.startsWith('hi')) || voices.find(v => v.lang.includes('IN')); } 
+  else { pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0]; }
+  if (pref) sampleUtt.voice = pref;
   
-  utt.onstart = () => { ttsActive = true; updateTTSBtn(); animateMouth(true); }; 
-  utt.onend = () => { 
-      ttsActive = false; updateTTSBtn(); animateMouth(false); 
-      setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400);
-  }; 
-  utt.onerror = () => { 
-      ttsActive = false; updateTTSBtn(); animateMouth(false); 
-      setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400);
-  };
-  synth.speak(utt);
+  sampleUtt.onstart = () => { ttsActive = true; updateTTSBtn(); animateMouth(true); }; 
+  sampleUtt.onend = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400); }; 
+  sampleUtt.onerror = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400); };
+  synth.speak(sampleUtt);
 }
 function stopTTS() { synth?.cancel(); ttsActive = false; updateTTSBtn(); animateMouth(false); }
-function updateTTSBtn() { const tb = document.getElementById('ttsBtn'); if(tb) tb.className = ttsActive ? 'icon-btn speaking' : 'icon-btn'; }
+function updateTTSBtn() { document.getElementById('ttsBtn').className = ttsActive ? 'icon-btn speaking' : 'icon-btn'; }
 function animateMouth(talking) { if (mouthTalkAnim) { cancelAnimationFrame(mouthTalkAnim); mouthTalkAnim = null; } if (!talking) { applyMouthForEmotion(currentEmotion); return; } let t = 0; const em = emotions[currentEmotion] || emotions.neutral; (function frame() { t += 0.18; setMouthPath(em.mouthType, (em.mouthOpen || 0) + Math.abs(Math.sin(t)) * 12); mouthTalkAnim = requestAnimationFrame(frame); })(); }
 
 // ════════════════════════════════════════════════════════
-// EXPRESSIVE FACE RENDERING ENGINE & BINDINGS
+// EXPRESSIVE FACE ENGINE
 // ════════════════════════════════════════════════════════
-const eyeEls = {}; 
-let eyeOff = {lx:0,ly:0,rx:0,ry:0}, eyeTgt = {lx:0,ly:0,rx:0,ry:0};
+const eyeEls = {}; let eyeOff = {lx:0,ly:0,rx:0,ry:0}, eyeTgt = {lx:0,ly:0,rx:0,ry:0};
+function initEyes() { ['lIris','lPupil','lLidTop','lLidBot','lHL1','lHL2','lRim','lBrow', 'rIris','rPupil','rLidTop','rLidBot','rHL1','rHL2','rRim','rBrow'].forEach(k => eyeEls[k] = document.getElementById(k)); runEyeLoop(); scheduleBlink(); scheduleEyeMove(); }
 
-function initEyes() { 
-  const elementIds = [
-    'lIris','lPupil','lLidTop','lLidBot','lHL1','lHL2','lRim','lBrow', 
-    'rIris','rPupil','rLidTop','rLidBot','rHL1','rHL2','rRim','rBrow'
-  ];
-  elementIds.forEach(k => {
-    const el = document.getElementById(k);
-    if (el) eyeEls[k] = el;
-  }); 
+function runEyeLoop() {
+  // Smoothly damp coordinate offsets using linear interpolation (lerp)
+  eyeOff.lx += (eyeTgt.lx - eyeOff.lx) * 0.12;
+  eyeOff.ly += (eyeTgt.ly - eyeOff.ly) * 0.12;
+  eyeOff.rx += (eyeTgt.rx - eyeOff.rx) * 0.12;
+  eyeOff.ry += (eyeTgt.ry - eyeOff.ry) * 0.12;
 
-  if (typeof runEyeLoop === 'function') { try { runEyeLoop(); } catch(e){} }
-  if (typeof scheduleBlink === 'function') { try { scheduleBlink(); } catch(e){} }
+  if (eyeEls.lIris && eyeEls.rIris) {
+    eyeEls.lIris.setAttribute('transform', `translate(${eyeOff.lx}, ${eyeOff.ly})`);
+    eyeEls.rIris.setAttribute('transform', `translate(${eyeOff.rx}, ${eyeOff.ry})`);
+  }
+  if (eyeEls.lPupil && eyeEls.rPupil) {
+    eyeEls.lPupil.setAttribute('transform', `translate(${eyeOff.lx * 1.2}, ${eyeOff.ly * 1.2})`);
+    eyeEls.rPupil.setAttribute('transform', `translate(${eyeOff.rx * 1.2}, ${eyeOff.ry * 1.2})`);
+  }
+  requestAnimationFrame(runEyeLoop);
 }
 
-// ════════════════════════════════════════════════════════
-// INTENTIONAL DOM EVENT ATTACHMENT LOOP
-// ════════════════════════════════════════════════════════
+function scheduleBlink() {
+  blinkTimer = setTimeout(() => {
+    if (currentEmotion !== 'dead' && currentEmotion !== 'sleeping') {
+      executeBlinkCycle().then(() => scheduleBlink());
+    } else {
+      scheduleBlink();
+    }
+  }, 2500 + Math.random() * 4000);
+}
+
+function executeBlinkCycle() {
+  return new Promise(resolve => {
+    if (eyeEls.lLidTop && eyeEls.lLidBot && eyeEls.rLidTop && eyeEls.rLidBot) {
+      eyeEls.lLidTop.setAttribute('y2', '110'); eyeEls.lLidBot.setAttribute('y2', '110');
+      eyeEls.rLidTop.setAttribute('y2', '110'); eyeEls.rLidBot.setAttribute('y2', '110');
+      setTimeout(() => {
+        eyeEls.lLidTop.setAttribute('y2', '45'); eyeEls.lLidBot.setAttribute('y2', '165');
+        eyeEls.rLidTop.setAttribute('y2', '45'); eyeEls.rLidBot.setAttribute('y2', '165');
+        setTimeout(resolve, 100);
+      }, 120);
+    } else { resolve(); }
+  });
+}
+
+function scheduleEyeMove() {
+  setTimeout(() => {
+    if (!isSleeping && currentEmotion === 'neutral') {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * 8;
+      eyeTgt.lx = Math.cos(angle) * dist; eyeTgt.ly = Math.sin(angle) * dist;
+      eyeTgt.rx = eyeTgt.lx; eyeTgt.ry = eyeTgt.ly;
+    }
+    scheduleEyeMove();
+  }, 1000 + Math.random() * 3000);
+}
+
+// Global initialization triggers
 document.addEventListener('DOMContentLoaded', () => {
-  // Bind standard layout components to explicitly prevent unclickable locks
-  const fsBtn = document.getElementById('fsBtn') || document.querySelector('.fs-btn');
-  if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
-
-  const bleBtn = document.getElementById('bleBtn');
-  if (bleBtn) bleBtn.addEventListener('click', toggleBLE);
-
-  const settingsBtn = document.getElementById('settingsBtn') || document.querySelector('.settings-btn') || document.getElementById('gearBtn');
-  if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
-
-  const closeSettingsBtn = document.getElementById('closeSettingsBtn') || document.getElementById('settingsClose');
-  if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettings);
-
-  const saveKeyBtn = document.getElementById('saveKeyBtn');
-  if (saveKeyBtn) saveKeyBtn.addEventListener('click', savePersonalization);
-
-  const clearKeyBtn = document.getElementById('clearKeyBtn');
-  if (clearKeyBtn) clearKeyBtn.addEventListener('click', clearApiKey);
-
-  const eyeBtn = document.getElementById('eyeBtn');
-  if (eyeBtn) eyeBtn.addEventListener('click', toggleKeyVisibility);
-
-  const sendBtn = document.getElementById('sendBtn');
-  if (sendBtn) sendBtn.addEventListener('click', sendChat);
-
-  const userInp = document.getElementById('userInput');
-  if (userInp) {
-    userInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
-  }
-
-  // Gracefully initiate dependencies
-  try { initEyes(); } catch(e) { console.warn("Eye elements mapping error skipped safely:", e); }
-  try { loadPersonalization(); } catch(e) { console.warn(e); }
-  try { updateKeyBadge(); } catch(e) { console.warn(e); }
-  try { updateMemoryPill(); } catch(e) { console.warn(e); }
+  loadPersonalization();
+  initEyes();
+  initCamera();
+  loadHistory();
+  updateKeyBadge();
 });
