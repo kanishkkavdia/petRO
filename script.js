@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-const WAKE_WORDS  = ['ok petro','petro','hey petro'];
+const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
 const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
@@ -52,7 +52,7 @@ window.onYouTubeIframeAPIReady = function() {
 };
 
 // ════════════════════════════════════════════════════════
-// FULLSCREEN & API, THEME & USAGE LOGIC
+// FULLSCREEN & API, THEME LOGIC
 // ════════════════════════════════════════════════════════
 async function toggleFullscreen() {
   if (!document.fullscreenElement) { 
@@ -108,7 +108,7 @@ function closeSettings() { document.getElementById('settingsModal').classList.re
 document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
 
 // ════════════════════════════════════════════════════════
-// BLUETOOTH (WITH DISCONNECTION PROTECTION CHANGES)
+// BLUETOOTH (WITH DISCONNECTION PROTECTION RETAINED)
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
@@ -125,7 +125,6 @@ async function toggleBLE() {
     } 
   }
   
-  // Re-bound disconnection event listener
   bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
   toast(`🔗 Connecting to ${bleDevice.name}…`);
   try { 
@@ -166,7 +165,6 @@ async function bleSend(cmd) {
   clearTimeout(hwTimeout); 
   hwTimeout = setTimeout(() => hardwareActive = false, 3000);
 
-  // Auto-reconnect execution wrapper logic
   if (!bleDevice?.gatt?.connected) { 
     try { 
       const server = await bleDevice.gatt.connect(); 
@@ -420,7 +418,6 @@ function speak(text) {
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
   utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
   
-  // Detect Hindi logic
   const isHindi = /[\u0900-\u097F]/.test(clean);
   const voices = synth.getVoices();
   let pref;
