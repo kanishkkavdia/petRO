@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
+const WAKE_WORDS  = ['ok petro','petro','hey petro'];
 const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
@@ -47,6 +47,37 @@ let followUpActive = false, followUpTimeout = null;
 let ytPlayer = null;
 let isYtApiReady = false;
 
+// Global structural safety buffers if they are missing elsewhere
+if (typeof emotions === 'undefined') {
+  window.emotions = { 
+    neutral: { mouthType: 'line', mouthOpen: 0 },
+    happy: { mouthType: 'smile', mouthOpen: 5 },
+    sad: { mouthType: 'frown', mouthOpen: 0 },
+    excited: { mouthType: 'smile', mouthOpen: 15 },
+    focused: { mouthType: 'line', mouthOpen: 2 },
+    dizzy: { mouthType: 'circle', mouthOpen: 10 },
+    afraid: { mouthType: 'circle', mouthOpen: 12 },
+    loving: { mouthType: 'smile', mouthOpen: 5 },
+    surprised: { mouthType: 'circle', mouthOpen: 20 },
+    shy: { mouthType: 'line', mouthOpen: 0 },
+    angry: { mouthType: 'frown', mouthOpen: 5 }
+  };
+}
+
+// Fallback UI rendering stubs to guarantee button click life
+if (typeof toast !== 'function') window.toast = str => console.log("Toast:", str);
+if (typeof appendMsg !== 'function') window.appendMsg = (r, t) => console.log(`[${r}]: ${t}`);
+if (typeof showTyping !== 'function') window.showTyping = () => null;
+if (typeof removeTyping !== 'function') window.removeTyping = () => {};
+if (typeof setEmotion !== 'function') window.setEmotion = (e) => { currentEmotion = e; };
+if (typeof applyMouthForEmotion !== 'function') window.applyMouthForEmotion = () => {};
+if (typeof setMouthPath !== 'function') window.setMouthPath = () => {};
+if (typeof startFollowUp !== 'function') window.startFollowUp = () => {};
+if (typeof stopAllRecog !== 'function') window.stopAllRecog = () => {};
+if (typeof startBgListen !== 'function') window.startBgListen = () => {};
+if (typeof updateMicBadge !== 'function') window.updateMicBadge = () => {};
+if (typeof resetInactivity !== 'function') window.resetInactivity = () => {};
+
 window.onYouTubeIframeAPIReady = function() {
   isYtApiReady = true;
 };
@@ -73,13 +104,13 @@ async function toggleFullscreen() {
 function getApiKey() { return localStorage.getItem('petro_gemini_key') || ''; }
 function saveApiKey() { const v = document.getElementById('apiKeyInput').value.trim(); if (!v) { toast('⚠️ Paste key'); return; } localStorage.setItem('petro_gemini_key', v); updateKeyBadge(); toast('✅ Key saved!'); closeSettings(); }
 function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.getElementById('apiKeyInput').value = ''; updateKeyBadge(); toast('🗑 Key removed'); }
-function updateKeyBadge() { const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); if (k) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } else { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; s.className = 'key-status bad'; s.textContent = 'No key saved'; } }
+function updateKeyBadge() { const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); if (k) { if(b) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; } if(s) { s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } } else { if(b) { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; } if(s) { s.className = 'key-status bad'; s.textContent = 'No key saved'; } } }
 function toggleKeyVisibility() { const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; } else { inp.type = 'password'; btn.textContent = '👁'; } }
 
 function loadPersonalization() { 
-  document.getElementById('userNameInput').value = localStorage.getItem('petro_user_name') || ''; 
-  document.getElementById('themeSelect').value = localStorage.getItem('petro_theme') || 'default'; 
-  document.getElementById('followUpSelect').value = localStorage.getItem('petro_followup') || '0';
+  const userIn = document.getElementById('userNameInput'); if (userIn) userIn.value = localStorage.getItem('petro_user_name') || ''; 
+  const themeSel = document.getElementById('themeSelect'); if (themeSel) themeSel.value = localStorage.getItem('petro_theme') || 'default'; 
+  const followSel = document.getElementById('followUpSelect'); if (followSel) followSel.value = localStorage.getItem('petro_followup') || '0';
   applyTheme(); 
 }
 
@@ -91,24 +122,27 @@ function savePersonalization() {
 }
 
 function applyTheme() {
-  const tId = document.getElementById('themeSelect').value || 'default', t = THEMES[tId], root = document.documentElement;
+  const themeSel = document.getElementById('themeSelect');
+  const tId = (themeSel && themeSel.value) || 'default', t = THEMES[tId], root = document.documentElement;
   root.style.setProperty('--theme-color', t.color); root.style.setProperty('--bg', t.bg); root.style.setProperty('--surface', t.surface); root.style.setProperty('--card', t.card);
-  document.getElementById('stop1-2').setAttribute('stop-color', t.color); document.getElementById('stop2-2').setAttribute('stop-color', t.color);
-  document.getElementById('lGlow').setAttribute('stroke', t.color); document.getElementById('rGlow').setAttribute('stroke', t.color);
+  
+  const s1 = document.getElementById('stop1-2'); if(s1) s1.setAttribute('stop-color', t.color);
+  const s2 = document.getElementById('stop2-2'); if(s2) s2.setAttribute('stop-color', t.color);
+  const lg = document.getElementById('lGlow'); if(lg) lg.setAttribute('stroke', t.color);
+  const rg = document.getElementById('rGlow'); if(rg) rg.setAttribute('stroke', t.color);
   
   if (currentEmotion === 'neutral') setEmotion('neutral', true);
 }
 
 function openSettings() { 
-  const k = getApiKey(); if (k) document.getElementById('apiKeyInput').value = k; 
-  document.getElementById('settingsModal').classList.add('open'); 
+  const k = getApiKey(); if (k && document.getElementById('apiKeyInput')) document.getElementById('apiKeyInput').value = k; 
+  const sm = document.getElementById('settingsModal'); if (sm) sm.classList.add('open'); 
   updateKeyBadge(); updateMemoryPill();
 }
-function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
-document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
+function closeSettings() { const sm = document.getElementById('settingsModal'); if (sm) sm.classList.remove('open'); }
 
 // ════════════════════════════════════════════════════════
-// BLUETOOTH (WITH DISCONNECTION PROTECTION RETAINED)
+// BLUETOOTH (WITH DISCONNECTION SAVES)
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
@@ -152,7 +186,7 @@ function onBleDisconnect() {
 }
 
 function setBLE(s) { 
-  const b = document.getElementById('bleBtn'); 
+  const b = document.getElementById('bleBtn'); if(!b) return;
   if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } 
   else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } 
   else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } 
@@ -199,8 +233,8 @@ async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); awa
 // ════════════════════════════════════════════════════════
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
-  } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; }
+    DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); const gb = document.getElementById('gyroBtn'); if(gb) gb.style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
+  } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); const gb = document.getElementById('gyroBtn'); if(gb) gb.style.display='none'; }
 }
 let lastAccel = 0;
 function bindSensors() {
@@ -298,7 +332,7 @@ async function openYouTube(query) {
     if (data.items && data.items.length > 0) {
       const vid = data.items[0].id.videoId;
       
-      document.getElementById('ytContainer').style.display = 'flex';
+      const ytc = document.getElementById('ytContainer'); if(ytc) ytc.style.display = 'flex';
       
       if (isYtApiReady) {
           if (!ytPlayer) {
@@ -311,7 +345,7 @@ async function openYouTube(query) {
               ytPlayer.loadVideoById(vid);
           }
       } else {
-         document.getElementById('ytPlayerDiv').innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
+         const ytpDiv = document.getElementById('ytPlayerDiv'); if(ytpDiv) ytpDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
       }
       
       appendMsg('bot', `Now Playing. If video gets stuck, watch here: https://youtube.com/watch?v=${vid}`);
@@ -330,12 +364,12 @@ function onPlayerStateChange(event) {
 }
 
 function closeYouTube() { 
-  document.getElementById('ytContainer').style.display = 'none'; 
+  const ytc = document.getElementById('ytContainer'); if(ytc) ytc.style.display = 'none'; 
   
   if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
       ytPlayer.stopVideo();
   } else {
-      document.getElementById('ytPlayerDiv').innerHTML = ''; 
+      const ytpDiv = document.getElementById('ytPlayerDiv'); if(ytpDiv) ytpDiv.innerHTML = ''; 
   }
   
   isVideoPlaying = false;
@@ -372,39 +406,40 @@ async function executeTools(toolCalls) {
 // CHAT FLOW
 // ════════════════════════════════════════════════════════
 async function sendChat() {
-  const inp = document.getElementById('userInput'), text = inp.value.trim();
+  const inp = document.getElementById('userInput'); if(!inp) return;
+  const text = inp.value.trim();
   if (!text || isBusy) return; inp.value = ''; resetInactivity();
   let attachedImage = currentUploadedImage || null; currentUploadedImage = null; updateUploadPreview();
   const visionKw = ['what am i holding','look at me','what is this','see this'];
   if (!attachedImage && visionKw.some(kw => text.toLowerCase().includes(kw))) { attachedImage = captureSnapshot(); if (attachedImage) { appendImageMsg('user', attachedImage); toast('📸 Auto-captured!'); } } else if (attachedImage) { appendImageMsg('user', attachedImage); }
   appendMsg('user', text); await doChat(text, attachedImage);
 }
-function sendSug(t) { document.getElementById('userInput').value = t; sendChat(); }
+function sendSug(t) { const ui = document.getElementById('userInput'); if(ui) ui.value = t; sendChat(); }
 async function doChat(userText, imageDataUrl = null) {
-  isBusy = true; document.getElementById('sendBtn').disabled = true; const typEl = showTyping();
+  isBusy = true; const sb = document.getElementById('sendBtn'); if(sb) sb.disabled = true; const typEl = showTyping();
   try {
     const { reply, emotion, toolCalls } = await callGemini(userText, imageDataUrl); removeTyping(typEl);
     appendMsg('bot', reply, toolCalls.map(t => t.name)); setEmotion(emotion); speak(reply);
     addToHistory('user', userText, imageDataUrl); addToHistory('model', reply); await executeTools(toolCalls);
-  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
+  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; if(sb) sb.disabled = false; }
 }
 function addToHistory(role, text, imageBase64 = null) { chatHistory.push({ role, text, imageBase64 }); if (chatHistory.length > MAX_HISTORY) chatHistory.splice(0, chatHistory.length - MAX_HISTORY); try { sessionStorage.setItem('petro_history', JSON.stringify(chatHistory.map(m => ({...m, imageBase64: null})))); } catch {} updateMemoryPill(); }
 function loadHistory() { try { const saved = sessionStorage.getItem('petro_history'); if (saved) chatHistory = JSON.parse(saved); } catch {} }
-function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_history'); } catch {} document.getElementById('messages').innerHTML = `<div class="msg bot"><div class="msg-label">petRO 🤖</div><div class="msg-bubble">Fresh start! ✨</div></div>`; toast('Chat cleared'); updateMemoryPill(); }
-function updateMemoryPill() { document.getElementById('memoryPill').textContent = `Memory: ${chatHistory.length} / ${MAX_HISTORY} msgs`; }
+function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_history'); } catch {} const msgs = document.getElementById('messages'); if(msgs) msgs.innerHTML = `<div class="msg bot"><div class="msg-label">petRO 🤖</div><div class="msg-bubble">Fresh start! ✨</div></div>`; toast('Chat cleared'); updateMemoryPill(); }
+function updateMemoryPill() { const mp = document.getElementById('memoryPill'); if(mp) mp.textContent = `Memory: ${chatHistory.length} / ${MAX_HISTORY} msgs`; }
 
 // ════════════════════════════════════════════════════════
 // CAMERA
 // ════════════════════════════════════════════════════════
-async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); document.getElementById('webcamView').srcObject = videoStream; } catch(e) { console.warn('Camera unavailable:', e); } }
+async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); const wv = document.getElementById('webcamView'); if(wv) wv.srcObject = videoStream; } catch(e) { console.warn('Camera unavailable:', e); } }
 function captureSnapshot() { const video = document.getElementById('webcamView'), canvas = document.getElementById('captureCanvas'); if (!video || !canvas || !videoStream) return null; const ctx = canvas.getContext('2d'); canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480; ctx.drawImage(video, 0, 0, canvas.width, canvas.height); return canvas.toDataURL('image/jpeg', 0.85); }
 function triggerFlash() { const f = document.createElement('div'); Object.assign(f.style, { position:'fixed', inset:'0', background:'#fff', zIndex:'9999', opacity:'1', transition:'opacity 0.4s ease' }); document.body.appendChild(f); setTimeout(() => { f.style.opacity = '0'; setTimeout(() => f.remove(), 400); }, 50); }
 function manualCapture() { const dataUrl = captureSnapshot(); if (dataUrl) { appendImageMsg('user', dataUrl); toast('📸 Captured!'); } }
 function autoCapture() { triggerFlash(); setTimeout(() => { const dataUrl = captureSnapshot(); if (dataUrl) { appendImageMsg('bot', dataUrl); doChat('Describe in detail what you see in this photo!', dataUrl); toast('📸 Snap!'); } }, 120); }
 function handleFileUpload(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { currentUploadedImage = ev.target.result; updateUploadPreview(); }; reader.readAsDataURL(file); }
-function clearUploadedImage() { currentUploadedImage = null; document.getElementById('fileInput').value = ''; updateUploadPreview(); }
-function updateUploadPreview() { const bar = document.getElementById('uploadPreviewBar'), img = document.getElementById('previewImg'); if (currentUploadedImage) { img.src = currentUploadedImage; bar.style.display = 'flex'; } else { bar.style.display = 'none'; img.src = ''; } }
-function appendImageMsg(role, dataUrl) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.style.padding = '4px'; const img = document.createElement('img'); img.src = dataUrl; img.style.cssText = 'max-width:100%;border-radius:10px;display:block;'; bub.appendChild(img); el.appendChild(bub); c.appendChild(el); c.scrollTop = c.scrollHeight; }
+function clearUploadedImage() { currentUploadedImage = null; const fi = document.getElementById('fileInput'); if(fi) fi.value = ''; updateUploadPreview(); }
+function updateUploadPreview() { const bar = document.getElementById('uploadPreviewBar'), img = document.getElementById('previewImg'); if(!bar || !img) return; if (currentUploadedImage) { img.src = currentUploadedImage; bar.style.display = 'flex'; } else { bar.style.display = 'none'; img.src = ''; } }
+function appendImageMsg(role, dataUrl) { const c = document.getElementById('messages'); if(!c) return; const el = document.createElement('div'); el.className = `msg ${role}`; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.style.padding = '4px'; const img = document.createElement('img'); img.src = dataUrl; img.style.cssText = 'max-width:100%;border-radius:10px;display:block;'; bub.appendChild(img); el.appendChild(bub); c.appendChild(el); c.scrollTop = c.scrollHeight; }
 
 // ════════════════════════════════════════════════════════
 // TTS
@@ -440,11 +475,64 @@ function speak(text) {
   synth.speak(utt);
 }
 function stopTTS() { synth?.cancel(); ttsActive = false; updateTTSBtn(); animateMouth(false); }
-function updateTTSBtn() { document.getElementById('ttsBtn').className = ttsActive ? 'icon-btn speaking' : 'icon-btn'; }
+function updateTTSBtn() { const tb = document.getElementById('ttsBtn'); if(tb) tb.className = ttsActive ? 'icon-btn speaking' : 'icon-btn'; }
 function animateMouth(talking) { if (mouthTalkAnim) { cancelAnimationFrame(mouthTalkAnim); mouthTalkAnim = null; } if (!talking) { applyMouthForEmotion(currentEmotion); return; } let t = 0; const em = emotions[currentEmotion] || emotions.neutral; (function frame() { t += 0.18; setMouthPath(em.mouthType, (em.mouthOpen || 0) + Math.abs(Math.sin(t)) * 12); mouthTalkAnim = requestAnimationFrame(frame); })(); }
 
 // ════════════════════════════════════════════════════════
-// EXPRESSIVE FACE ENGINE
+// EXPRESSIVE FACE ENGINE & RUNTIME SETUP
 // ════════════════════════════════════════════════════════
-const eyeEls = {}; let eyeOff = {lx:0,ly:0,rx:0,ry:0}, eyeTgt = {lx:0,ly:0,rx:0,ry:0};
-function initEyes() { ['lIris','lPupil','lLidTop','lLidBot','lHL1','lHL2','lRim','lBrow', 'rIris','rPupil','rLidTop','rLidBot','rHL1','rHL2','rRim','rBrow'].forEach(k => eyeEls[k] = document.getElementById(k)); runEyeLoop(); scheduleBlink(); }
+const eyeEls = {}; 
+let eyeOff = {lx:0,ly:0,rx:0,ry:0}, eyeTgt = {lx:0,ly:0,rx:0,ry:0};
+
+function initEyes() { 
+  const elementIds = [
+    'lIris','lPupil','lLidTop','lLidBot','lHL1','lHL2','lRim','lBrow', 
+    'rIris','rPupil','rLidTop','rLidBot','rHL1','rHL2','rRim','rBrow'
+  ];
+  elementIds.forEach(k => {
+    const el = document.getElementById(k);
+    if (el) eyeEls[k] = el;
+  }); 
+
+  if (typeof runEyeLoop === 'function') { try { runEyeLoop(); } catch(e){} }
+  if (typeof scheduleBlink === 'function') { try { scheduleBlink(); } catch(e){} }
+}
+
+// Global UI Setup Event Listeners to force click responsiveness
+document.addEventListener('DOMContentLoaded', () => {
+  // Bind UI control elements explicitly to guarantee click operations
+  const fsBtn = document.getElementById('fsBtn') || document.querySelector('.fs-btn');
+  if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
+
+  const bleBtn = document.getElementById('bleBtn');
+  if (bleBtn) bleBtn.addEventListener('click', toggleBLE);
+
+  const settingsBtn = document.getElementById('settingsBtn') || document.querySelector('.settings-btn') || document.getElementById('gearBtn');
+  if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+
+  const closeSettingsBtn = document.getElementById('closeSettingsBtn') || document.getElementById('settingsClose');
+  if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettings);
+
+  const saveKeyBtn = document.getElementById('saveKeyBtn');
+  if (saveKeyBtn) saveKeyBtn.addEventListener('click', saveApiKey);
+
+  const clearKeyBtn = document.getElementById('clearKeyBtn');
+  if (clearKeyBtn) clearKeyBtn.addEventListener('click', clearApiKey);
+
+  const eyeBtn = document.getElementById('eyeBtn');
+  if (eyeBtn) eyeBtn.addEventListener('click', toggleKeyVisibility);
+
+  const sendBtn = document.getElementById('sendBtn');
+  if (sendBtn) sendBtn.addEventListener('click', sendChat);
+
+  const userInp = document.getElementById('userInput');
+  if (userInp) {
+    userInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+  }
+
+  // Safety initializers
+  try { initEyes(); } catch(e) { console.warn(e); }
+  try { loadPersonalization(); } catch(e) { console.warn(e); }
+  try { updateKeyBadge(); } catch(e) { console.warn(e); }
+  try { updateMemoryPill(); } catch(e) { console.warn(e); }
+});
