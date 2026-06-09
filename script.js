@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-const WAKE_WORDS  = ['ok petro','petro','hey petro'];
+const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
 const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
@@ -28,7 +28,7 @@ const THEMES = {
 };
 
 // ════════════════════════════════════════════════════════
-// STATE
+// STATE MANAGEMENT
 // ════════════════════════════════════════════════════════
 let bleDevice = null, bleCmdChar = null, bleConnected = false, isBusy = false;
 let currentEmotion = 'neutral', emotionResetTimer = null; 
@@ -47,7 +47,7 @@ let followUpActive = false, followUpTimeout = null;
 let ytPlayer = null;
 let isYtApiReady = false;
 
-// Global structural safety buffers if they are missing elsewhere
+// Global safety emotional matrices fallback
 if (typeof emotions === 'undefined') {
   window.emotions = { 
     neutral: { mouthType: 'line', mouthOpen: 0 },
@@ -64,7 +64,9 @@ if (typeof emotions === 'undefined') {
   };
 }
 
-// Fallback UI rendering stubs to guarantee button click life
+// ════════════════════════════════════════════════════════
+// RUNTIME RUN-SHIELD STUBS (Guarantees Page Interactivity)
+// ════════════════════════════════════════════════════════
 if (typeof toast !== 'function') window.toast = str => console.log("Toast:", str);
 if (typeof appendMsg !== 'function') window.appendMsg = (r, t) => console.log(`[${r}]: ${t}`);
 if (typeof showTyping !== 'function') window.showTyping = () => null;
@@ -102,10 +104,46 @@ async function toggleFullscreen() {
 }
 
 function getApiKey() { return localStorage.getItem('petro_gemini_key') || ''; }
-function saveApiKey() { const v = document.getElementById('apiKeyInput').value.trim(); if (!v) { toast('⚠️ Paste key'); return; } localStorage.setItem('petro_gemini_key', v); updateKeyBadge(); toast('✅ Key saved!'); closeSettings(); }
-function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.getElementById('apiKeyInput').value = ''; updateKeyBadge(); toast('🗑 Key removed'); }
-function updateKeyBadge() { const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); if (k) { if(b) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; } if(s) { s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } } else { if(b) { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; } if(s) { s.className = 'key-status bad'; s.textContent = 'No key saved'; } } }
-function toggleKeyVisibility() { const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; } else { inp.type = 'password'; btn.textContent = '👁'; } }
+
+function saveApiKey() { 
+  const input = document.getElementById('apiKeyInput');
+  if (!input) return;
+  const v = input.value.trim(); 
+  if (!v) { toast('⚠️ Paste key'); return; } 
+  localStorage.setItem('petro_gemini_key', v); 
+  updateKeyBadge(); 
+  toast('✅ Key saved!'); 
+  closeSettings(); 
+}
+
+function clearApiKey() { 
+  localStorage.removeItem('petro_gemini_key'); 
+  const input = document.getElementById('apiKeyInput');
+  if (input) input.value = ''; 
+  updateKeyBadge(); 
+  toast('🗑 Key removed'); 
+}
+
+function updateKeyBadge() { 
+  const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); 
+  if (k) { 
+    if(b) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; } 
+    if(s) { s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } 
+  } else { 
+    if(b) { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; } 
+    if(s) { s.className = 'key-status bad'; s.textContent = 'No key saved'; } 
+  } 
+}
+
+function toggleKeyVisibility() { 
+  const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); 
+  if (!inp || !btn) return;
+  if (inp.type === 'password') { 
+    inp.type = 'text'; btn.textContent = '🙈'; 
+  } else { 
+    inp.type = 'password'; btn.textContent = '👁'; 
+  } 
+}
 
 function loadPersonalization() { 
   const userIn = document.getElementById('userNameInput'); if (userIn) userIn.value = localStorage.getItem('petro_user_name') || ''; 
@@ -115,9 +153,12 @@ function loadPersonalization() {
 }
 
 function savePersonalization() { 
-  localStorage.setItem('petro_user_name', document.getElementById('userNameInput').value.trim()); 
-  localStorage.setItem('petro_theme', document.getElementById('themeSelect').value); 
-  localStorage.setItem('petro_followup', document.getElementById('followUpSelect').value);
+  const userIn = document.getElementById('userNameInput');
+  const themeSel = document.getElementById('themeSelect');
+  const followSel = document.getElementById('followUpSelect');
+  if(userIn) localStorage.setItem('petro_user_name', userIn.value.trim()); 
+  if(themeSel) localStorage.setItem('petro_theme', themeSel.value); 
+  if(followSel) localStorage.setItem('petro_followup', followSel.value);
   applyTheme(); toast('✅ Saved!'); 
 }
 
@@ -135,14 +176,16 @@ function applyTheme() {
 }
 
 function openSettings() { 
-  const k = getApiKey(); if (k && document.getElementById('apiKeyInput')) document.getElementById('apiKeyInput').value = k; 
-  const sm = document.getElementById('settingsModal'); if (sm) sm.classList.add('open'); 
+  const k = getApiKey(); 
+  if (k && document.getElementById('apiKeyInput')) document.getElementById('apiKeyInput').value = k; 
+  const sm = document.getElementById('settingsModal'); 
+  if (sm) sm.classList.add('open'); 
   updateKeyBadge(); updateMemoryPill();
 }
 function closeSettings() { const sm = document.getElementById('settingsModal'); if (sm) sm.classList.remove('open'); }
 
 // ════════════════════════════════════════════════════════
-// BLUETOOTH (WITH DISCONNECTION SAVES)
+// BLUETOOTH CONTROL
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
@@ -214,7 +257,7 @@ async function bleSend(cmd) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ════════════════════════════════════════════════════════
-// DIRECT MOVEMENT & HARDWARE ACTIONS
+// HARDWARE ACTIONS
 // ════════════════════════════════════════════════════════
 let isMoving = false;
 async function startDirectMove(cmd) { if (!bleConnected) { toast('⚠️ Connect BLE first!'); return; } resetInactivity(); isMoving = true; await bleSend(cmd); }
@@ -229,7 +272,7 @@ async function doDance() { toast('💃 Dancing!'); setEmotion('excited'); for (c
 async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); await bleSend('W'); await sleep(4000); toast('✅ Done'); }
 
 // ════════════════════════════════════════════════════════
-// MOTION SENSORS
+// MOTION ENGINE
 // ════════════════════════════════════════════════════════
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -252,7 +295,7 @@ function bindSensors() {
 }
 
 // ════════════════════════════════════════════════════════
-// GEMINI AGENT
+// GEMINI API AGENT
 // ════════════════════════════════════════════════════════
 function buildSystemPrompt() {
   const uName = localStorage.getItem('petro_user_name') || ''; const theme = THEMES[localStorage.getItem('petro_theme') || 'default'];
@@ -322,7 +365,7 @@ function detectEmotion(toolCalls, reply) {
 }
 
 // ════════════════════════════════════════════════════════
-// YOUTUBE INTERACTION
+// YOUTUBE FRAME OPERATIONS
 // ════════════════════════════════════════════════════════
 async function openYouTube(query) {
   toast(`🔍 Searching YouTube for "${query}"...`);
@@ -381,7 +424,7 @@ function closeYouTube() {
 }
 
 // ════════════════════════════════════════════════════════
-// TOOL EXECUTION
+// APPARATUS FUNCTIONS DISPATCHER
 // ════════════════════════════════════════════════════════
 async function executeTools(toolCalls) {
   for (const tc of toolCalls) {
@@ -403,7 +446,7 @@ async function executeTools(toolCalls) {
 }
 
 // ════════════════════════════════════════════════════════
-// CHAT FLOW
+// MESSAGING PIPELINE
 // ════════════════════════════════════════════════════════
 async function sendChat() {
   const inp = document.getElementById('userInput'); if(!inp) return;
@@ -429,7 +472,7 @@ function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_
 function updateMemoryPill() { const mp = document.getElementById('memoryPill'); if(mp) mp.textContent = `Memory: ${chatHistory.length} / ${MAX_HISTORY} msgs`; }
 
 // ════════════════════════════════════════════════════════
-// CAMERA
+// OPTICAL HARDWARE (CAMERA Snapshots)
 // ════════════════════════════════════════════════════════
 async function initCamera() { try { videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }); const wv = document.getElementById('webcamView'); if(wv) wv.srcObject = videoStream; } catch(e) { console.warn('Camera unavailable:', e); } }
 function captureSnapshot() { const video = document.getElementById('webcamView'), canvas = document.getElementById('captureCanvas'); if (!video || !canvas || !videoStream) return null; const ctx = canvas.getContext('2d'); canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480; ctx.drawImage(video, 0, 0, canvas.width, canvas.height); return canvas.toDataURL('image/jpeg', 0.85); }
@@ -442,7 +485,7 @@ function updateUploadPreview() { const bar = document.getElementById('uploadPrev
 function appendImageMsg(role, dataUrl) { const c = document.getElementById('messages'); if(!c) return; const el = document.createElement('div'); el.className = `msg ${role}`; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.style.padding = '4px'; const img = document.createElement('img'); img.src = dataUrl; img.style.cssText = 'max-width:100%;border-radius:10px;display:block;'; bub.appendChild(img); el.appendChild(bub); c.appendChild(el); c.scrollTop = c.scrollHeight; }
 
 // ════════════════════════════════════════════════════════
-// TTS
+// TTS TEXT-TO-SPEECH
 // ════════════════════════════════════════════════════════
 const synth = window.speechSynthesis;
 function speak(text) {
@@ -479,7 +522,7 @@ function updateTTSBtn() { const tb = document.getElementById('ttsBtn'); if(tb) t
 function animateMouth(talking) { if (mouthTalkAnim) { cancelAnimationFrame(mouthTalkAnim); mouthTalkAnim = null; } if (!talking) { applyMouthForEmotion(currentEmotion); return; } let t = 0; const em = emotions[currentEmotion] || emotions.neutral; (function frame() { t += 0.18; setMouthPath(em.mouthType, (em.mouthOpen || 0) + Math.abs(Math.sin(t)) * 12); mouthTalkAnim = requestAnimationFrame(frame); })(); }
 
 // ════════════════════════════════════════════════════════
-// EXPRESSIVE FACE ENGINE & RUNTIME SETUP
+// EXPRESSIVE FACE RENDERING ENGINE & BINDINGS
 // ════════════════════════════════════════════════════════
 const eyeEls = {}; 
 let eyeOff = {lx:0,ly:0,rx:0,ry:0}, eyeTgt = {lx:0,ly:0,rx:0,ry:0};
@@ -498,9 +541,11 @@ function initEyes() {
   if (typeof scheduleBlink === 'function') { try { scheduleBlink(); } catch(e){} }
 }
 
-// Global UI Setup Event Listeners to force click responsiveness
+// ════════════════════════════════════════════════════════
+// INTENTIONAL DOM EVENT ATTACHMENT LOOP
+// ════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-  // Bind UI control elements explicitly to guarantee click operations
+  // Bind standard layout components to explicitly prevent unclickable locks
   const fsBtn = document.getElementById('fsBtn') || document.querySelector('.fs-btn');
   if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
 
@@ -514,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettings);
 
   const saveKeyBtn = document.getElementById('saveKeyBtn');
-  if (saveKeyBtn) saveKeyBtn.addEventListener('click', saveApiKey);
+  if (saveKeyBtn) saveKeyBtn.addEventListener('click', savePersonalization);
 
   const clearKeyBtn = document.getElementById('clearKeyBtn');
   if (clearKeyBtn) clearKeyBtn.addEventListener('click', clearApiKey);
@@ -530,8 +575,8 @@ document.addEventListener('DOMContentLoaded', () => {
     userInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
   }
 
-  // Safety initializers
-  try { initEyes(); } catch(e) { console.warn(e); }
+  // Gracefully initiate dependencies
+  try { initEyes(); } catch(e) { console.warn("Eye elements mapping error skipped safely:", e); }
   try { loadPersonalization(); } catch(e) { console.warn(e); }
   try { updateKeyBadge(); } catch(e) { console.warn(e); }
   try { updateMemoryPill(); } catch(e) { console.warn(e); }
