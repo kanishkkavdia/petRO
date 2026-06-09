@@ -417,7 +417,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div class="settings-row">
       <div class="settings-label">👤 Your Identity</div>
       <div class="settings-input-wrap">
-        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name (e.g., Bhubhu's Human)">
+        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name">
       </div>
     </div>
     <div class="settings-row">
@@ -446,6 +446,30 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         <button class="save-btn" onclick="saveApiKey()">💾 Save Key</button>
         <button class="danger-btn" onclick="clearApiKey()">🗑 Remove Key</button>
       </div>
+    </div>
+
+    <hr class="settings-divider">
+
+    <div class="settings-row">
+      <div class="settings-label">⏱️ Follow-up Window</div>
+      <select id="followUpSelect" class="settings-input">
+        <option value="0">None (Say wake word every time)</option>
+        <option value="5000">5 Seconds</option>
+        <option value="10000">10 Seconds</option>
+        <option value="15000">15 Seconds</option>
+      </select>
+    </div>
+
+    <hr class="settings-divider">
+
+    <div class="settings-row">
+      <div class="settings-label">📊 API Usage & Cost Estimate</div>
+      <div class="ble-info" id="usageBox" style="line-height: 1.5;">
+        Requests: <b>0</b><br>
+        Tokens: <b>0</b> In / <b>0</b> Out<br>
+        Est. Cost: <b>$0.00000</b>
+      </div>
+      <button class="danger-btn" onclick="clearUsage()" style="margin-top:4px;">🗑 Reset Counters</button>
     </div>
 
     <hr class="settings-divider">
