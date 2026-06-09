@@ -120,6 +120,9 @@ function trackUsage(inTokens, outTokens) {
     updateUsageUI();
 }
 
+// ════════════════════════════════════════════════════════
+// BLUETOOTH MECHANICS
+// ════════════════════════════════════════════════════════
 function updateUsageUI() {
     const el = document.getElementById('usageBox'); if (!el) return;
     let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
@@ -131,9 +134,6 @@ function clearUsage() {
     localStorage.removeItem('petro_usage'); updateUsageUI(); toast('🗑 Usage reset');
 }
 
-// ════════════════════════════════════════════════════════
-// BLUETOOTH (REFACTORED WITH SAFE DISPATCH PROCEEDINGS)
-// ════════════════════════════════════════════════════════
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
   if (!navigator.bluetooth) { toast('❌ Web Bluetooth not supported.'); return; }
@@ -196,13 +196,12 @@ function updateBleInfoBox() {
   el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; 
 }
 
-// Thread-safe serial data queue coordinator
 function bleSend(cmd) {
   if (!bleConnected || !bleCmdChar) return;
   
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
-  hwTimeout = setTimeout(() => hardwareActive = false, 3000);
+  hwTimeout = setTimeout(() => { if(!isMoving) hardwareActive = false; }, 3000);
 
   bleQueue.push(cmd);
   processBleQueue();
@@ -265,7 +264,7 @@ function stopBleHeartbeat() {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ════════════════════════════════════════════════════════
-// DIRECT MOVEMENT & HARDWARE ACTIONS
+// DIRECT MOVEMENT & HARDWARE ACTIONS (REVISED)
 // ════════════════════════════════════════════════════════
 let isMoving = false;
 async function startDirectMove(cmd) { if (!bleConnected) { toast('⚠️ Connect BLE first!'); return; } resetInactivity(); isMoving = true; bleSend(cmd); }
@@ -287,19 +286,45 @@ async function doAction(action) {
       break; 
   }
 }
+
 async function doDance() { 
   toast('💃 Dancing!'); 
   setEmotion('excited'); 
+  
+  hardwareActive = true;
+  isMoving = true;
+  
   for (const [cmd, ms] of DANCE_STEPS) { 
+    if (!bleConnected) break;
     bleSend(cmd); 
     if (ms > 0) await sleep(ms); 
   } 
+  
+  isMoving = false;
+  hardwareActive = false;
   toast('🎉 Done!'); 
 }
-async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); bleSend('W'); await sleep(4000); toast('✅ Done'); }
+
+async function doWander() { 
+  toast('🗺 Wandering!'); 
+  setEmotion('focused'); 
+  
+  hardwareActive = true;
+  isMoving = true;
+  
+  bleSend('W'); 
+  await sleep(4000); 
+  
+  bleSend('S');
+  await sleep(100);
+  
+  isMoving = false;
+  hardwareActive = false;
+  toast('✅ Done'); 
+}
 
 // ════════════════════════════════════════════════════════
-// MOTION SENSORS (THROTTLED TO AVOID DATA DROPS)
+// MOTION SENSORS
 // ════════════════════════════════════════════════════════
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
