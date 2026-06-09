@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-const WAKE_WORDS   = ['ok petro','okay petro','hey petro'];
+const WAKE_WORDS   = ['ok petro','petro','hey petro'];
 const SLEEP_MS     = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL   = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
