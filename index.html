@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#090d18">
 <link rel="manifest" href="manifest.json">
 <title>petRO</title>
-<link rel="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/robot/default/48px.svg">
+<link class="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/robot/default/48px.svg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;900&family=Space+Mono:wght@400;700&display=swap');
 
@@ -76,7 +76,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .face-wrap { width: min(380px, 92vw); flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; }
 .face-wrap svg { width: 100%; height: auto; display: block; overflow: visible; transition: all 0.3s; }
 
-/* ── Listening Status Text (Replaces Overlay) ── */
+/* ── Listening Status Text ── */
 #listeningStatus {
   position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
   font-size: 0.8rem; font-weight: 700; color: var(--theme-color);
@@ -109,7 +109,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 #normalControls { display: flex; flex-direction: column; gap: 14px; }
 .dpad { display:grid; grid-template-areas:". up ." "left stop right" ". down ."; gap:8px; justify-content:center; }
 .dp { width:58px; height:58px; border-radius:16px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:1.3rem; cursor:pointer; transition:all 0.1s; display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; touch-action: manipulation; }
-.dp:active,.dp.pressed { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.9); }
+.dp:active, .dp.pressed { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.9); }
 .dp[data-d=forward]  { grid-area:up; }
 .dp[data-d=backward] { grid-area:down; }
 .dp[data-d=left]     { grid-area:left; }
@@ -181,15 +181,15 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .settings-label { font-size:0.72rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
 .settings-input-wrap { position:relative; display:flex; align-items:center; }
 .settings-input {
-  flex:1; background:var(--card); border:1px solid var(--border); border-radius:10px;
+  width:100%; background:var(--card); border:1px solid var(--border); border-radius:10px;
   color:var(--text); font-family:'Space Mono',monospace; font-size:0.78rem;
-  padding:10px 12px; outline:none; transition:border-color 0.15s;
+  padding:10px 12px; outline:none; transition:border-color 0.15s; box-sizing: border-box;
 }
 .settings-input[type="password"] { padding-right: 40px; }
 .settings-input:focus { border-color:var(--theme-color); }
 .settings-input::placeholder { color:var(--muted); font-family:'Nunito',sans-serif; }
 .eye-btn { position:absolute; right:10px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:0; }
-.save-btn { padding:10px 20px; border-radius:10px; border:none; background:var(--theme-color); color:#fff; font-family:'Nunito',sans-serif; font-size:0.88rem; font-weight:700; cursor:pointer; transition:all 0.12s; }
+.save-btn { padding:10px 20px; border-radius:10px; border:none; background:var(--theme-color); color:#fff; font-family:'Nunito',sans-serif; font-size:0.88rem; font-weight:700; cursor:pointer; transition:all 0.12s; text-align: center; }
 .save-btn:active { transform:scale(0.97); }
 .key-status { font-size:0.75rem; padding:6px 10px; border-radius:8px; }
 .key-status.ok  { background:rgba(34,211,160,0.1); color:var(--green); border:1px solid rgba(34,211,160,0.2); }
@@ -215,6 +215,10 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 #ytHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: var(--card); border-bottom: 1px solid var(--border); }
 #ytPlayerDiv { flex: 1; border: none; width: 100%; }
 .close-yt-btn { background: var(--red); color: white; border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+
+/* Structural Camera Element Styles */
+#webcamView { position: absolute; bottom: 10px; left: 10px; width: 60px; height: 45px; border-radius: 4px; transform: scaleX(-1); opacity: 0.15; object-fit: cover; pointer-events: none; }
+#uploadPreviewImg { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; }
 </style>
 <script src="https://www.youtube.com/iframe_api"></script>
 </head>
@@ -223,11 +227,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 <div id="topbar">
   <div class="logo">pet<span>RO</span></div>
   <div class="topbar-right">
-    <div class="badge"            id="fsBtn"       onclick="toggleFullscreen()"   title="Toggle Fullscreen">⛶ FS</div>
-    <div class="badge mic-off"    id="micBadge"  onclick="toggleAlwaysOnMic()"  title="Toggle wake word mic">🎤 OFF</div>
-    <div class="badge key-missing" id="keyBadge" onclick="openSettings()"       title="Gemini API key">🔑 KEY</div>
-    <div class="badge ble-off"    id="bleBtn"    onclick="toggleBLE()"          title="Connect to petRO BLE">⚫ BLE</div>
-    <div class="badge"            id="settingsBtn" onclick="openSettings()"     style="color:var(--muted)">⚙</div>
+    <div class="badge"            id="fsBtn"           onclick="toggleFullscreen()"   title="Toggle Fullscreen">⛶ FS</div>
+    <div class="badge mic-off"    id="micBadge"        onclick="toggleAlwaysOnMic()"  title="Toggle wake word mic">🎤 OFF</div>
+    <div class="badge key-missing" id="keyBadge"       onclick="openSettings()"       title="Gemini API key">🔑 KEY</div>
+    <div class="badge ble-off"    id="bleBtn"          onclick="toggleBLE()"          title="Connect to petRO BLE">⚫ BLE</div>
+    <div class="badge"            id="settingsBtn"     onclick="openSettings()"       style="color:var(--muted)">⚙</div>
   </div>
 </div>
 
@@ -314,11 +318,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
           <g id="theme-dog" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 40 30 C -20 30, -30 160, 10 180 C 40 160, 50 100, 55 50 Z" fill="#b07a48" /><path d="M 260 30 C 320 30, 330 160, 290 180 C 260 160, 250 100, 245 50 Z" fill="#b07a48" /><path d="M 135 125 Q 150 120 165 125 L 155 140 Q 150 145 145 140 Z" fill="#1a1a1a" /><circle cx="146" cy="128" r="3" fill="#ffffff" opacity="0.4"/></g>
           <g id="theme-monkey" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><circle cx="10" cy="100" r="32" fill="#5d4037" /><circle cx="15" cy="100" r="18" fill="#a1887f" /><circle cx="290" cy="100" r="32" fill="#5d4037" /><circle cx="285" cy="100" r="18" fill="#a1887f" /><path d="M 130 18 Q 150 -15 170 18 Q 160 25 150 25 Q 140 25 130 18 Z" fill="#5d4037" /></g>
           <g id="theme-terminator" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 10 80 L 30 40 L 70 20 L 60 90 Z" fill="#333" stroke="#111" stroke-width="2" opacity="0.9"/><line x1="30" y1="40" x2="10" y2="100" stroke="#111" stroke-width="3" /><path d="M 130 5 L 170 5 L 160 30 L 140 30 Z" fill="#555" stroke="#222" stroke-width="2" /><ellipse cx="235" cy="88" rx="66" ry="66" fill="none" stroke="#ff0000" stroke-width="6" opacity="0.8"/><circle cx="235" cy="88" r="34" fill="none" stroke="#ff0000" stroke-width="2" opacity="0.6"/><line x1="235" y1="20" x2="235" y2="50" stroke="#ff0000" stroke-width="2" opacity="0.7"/><line x1="235" y1="126" x2="235" y2="156" stroke="#ff0000" stroke-width="2" opacity="0.7"/><line x1="167" y1="88" x2="197" y2="88" stroke="#ff0000" stroke-width="2" opacity="0.7"/><line x1="273" y1="88" x2="303" y2="88" stroke="#ff0000" stroke-width="2" opacity="0.7"/></g>
-          <g id="theme-starwars" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 30 25 Q 150 -15 270 25 L 260 40 Q 150 5 40 40 Z" fill="#0055ff" /><rect x="130" y="5" width="40" height="15" fill="#e0e0e0" /><circle cx="150" cy="30" r="18" fill="#222" stroke="#silver" stroke-width="3" /><circle cx="150" cy="30" r="6" fill="#ff0000" /><rect x="15" y="110" width="20" height="50" fill="#0055ff" rx="4" /><rect x="265" y="110" width="20" height="50" fill="#0055ff" rx="4" /><line x1="15" y1="120" x2="35" y2="120" stroke="#111" stroke-width="2"/><line x1="265" y1="120" x2="285" y2="120" stroke="#111" stroke-width="2"/></g>
+          <g id="theme-starwars" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 30 25 Q 150 -15 270 25 L 260 40 Q 150 5 40 40 Z" fill="#0055ff" /><rect x="130" y="5" width="40" height="15" fill="#e0e0e0" /><circle cx="150" cy="30" r="18" fill="#222" stroke="silver" stroke-width="3" /><circle cx="150" cy="30" r="6" fill="#ff0000" /><rect x="15" y="110" width="20" height="50" fill="#0055ff" rx="4" /><rect x="265" y="110" width="20" height="50" fill="#0055ff" rx="4" /><line x1="15" y1="120" x2="35" y2="120" stroke="#111" stroke-width="2"/><line x1="265" y1="120" x2="285" y2="120" stroke="#111" stroke-width="2"/></g>
           <g id="theme-transformer" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><polygon points="140,5 160,5 160,40 150,60 140,40" fill="#e0e0e0" stroke="#888" stroke-width="2" /><polygon points="145,15 155,15 155,35 150,45 145,35" fill="#0044cc" /><path d="M 20 15 L 55 5 L 65 40 L 10 120 L 10 40 Z" fill="#0044cc" stroke="#003399" stroke-width="2"/><path d="M 280 15 L 245 5 L 235 40 L 290 120 L 290 40 Z" fill="#0044cc" stroke="#003399" stroke-width="2"/><rect x="0" y="45" width="12" height="65" fill="#e0e0e0" stroke="#888" stroke-width="1"/><rect x="288" y="45" width="12" height="65" fill="#e0e0e0" stroke="#888" stroke-width="1"/><path d="M 80 145 L 150 120 L 220 145 L 210 210 L 150 220 L 90 210 Z" fill="#b0b5ba" stroke="#555" stroke-width="3" /><line x1="100" y1="155" x2="200" y2="155" stroke="#666" stroke-width="4" stroke-linecap="round"/><line x1="105" y1="170" x2="195" y2="170" stroke="#666" stroke-width="4" stroke-linecap="round"/><line x1="110" y1="185" x2="190" y2="185" stroke="#666" stroke-width="4" stroke-linecap="round"/></g>
         </g>
 
-        <g id="sleepZZZ" opacity="0"><text id="z1" x="248" y="40" font-family="Nunito" font-size="16" font-weight="900" fill="#a855f7">z</text><text id="z2" x="262" y="24" font-family="Nunito" font-size="20" font-weight="900" fill="#a855f7" opacity="0.7">z</text><text id="z3" x="278" y="6"   font-family="Nunito" font-size="24" font-weight="900" fill="#a855f7" opacity="0.5">Z</text></g>
+        <g id="sleepZZZ" opacity="0"><text id="z1" x="248" y="40" font-family="Nunito" font-size="16" font-weight="900" fill="#a855f7">z</text><text id="z2" x="262" y="24" font-family="Nunito" font-size="20" font-weight="900" fill="#a855f7" opacity="0.7">z</text><text id="z3" x="278" y="6"  font-family="Nunito" font-size="24" font-weight="900" fill="#a855f7" opacity="0.5">Z</text></g>
         <g id="rippleGroup" opacity="0"><circle cx="150" cy="190" r="5" fill="#3b9eff"/><circle id="rp1" cx="150" cy="190" r="5" fill="none" stroke="#3b9eff" stroke-width="2" opacity="0"/><circle id="rp2" cx="150" cy="190" r="5" fill="none" stroke="#3b9eff" stroke-width="2" opacity="0"/></g>
         <g id="tearGroup" opacity="0"><ellipse id="tearL" cx="52"  cy="128" rx="4" ry="6" fill="#7dd3ff" opacity="0.8"/><ellipse id="tearR" cx="248" cy="128" rx="4" ry="6" fill="#7dd3ff" opacity="0.8"/></g>
       </svg>
@@ -328,6 +332,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   <div class="scroll-hint" onclick="document.getElementById('controlsScreen').scrollIntoView({behavior:'smooth'})">
     <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg> Controls
   </div>
+  <video id="webcamView" autoplay playsinline muted></video>
+  <canvas id="captureCanvas" style="display:none;"></canvas>
 </div>
 
 <div id="controlsScreen">
@@ -336,11 +342,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div id="normalControls">
       <div class="section-label">🕹 Direct Controls</div>
       <div class="dpad">
-        <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▲</button>
-        <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">◀</button>
+        <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()">▲</button>
+        <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()">◀</button>
         <button class="dp" data-d="stop"     onclick="stopDirectMove()">■</button>
-        <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▶</button>
-        <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▼</button>
+        <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()">▶</button>
+        <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()">▼</button>
       </div>
       <div class="action-grid">
         <button class="act" onclick="doAction('dance')">💃 Dance</button>
@@ -389,13 +395,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
       <button class="sug" onclick="sendSug('Play lofi hip hop on youtube')">🎵 Lofi</button>
       <button class="sug" onclick="sendSug('Draw a circle')">⭕ Circle</button>
     </div>
-    <div id="uploadPreviewBar" style="display:none;padding:6px 12px;background:var(--card);border-top:1px solid var(--border);align-items:center;gap:10px;">
-        </div>
     
+    <div id="uploadPreviewBar" style="display:none;padding:6px 12px;background:var(--card);border-top:1px solid var(--border);align-items:center;gap:10px;">
+        <img id="uploadPreviewImg" src="" alt="preview">
+        <span style="font-size:11px; color:var(--text); flex:1;">Image attached</span>
+        <button onclick="clearUploadedImage()" style="background:none; border:none; color:var(--red); cursor:pointer;">✕</button>
+    </div>
     <div id="inputBar">
-      <input type="text" id="chatInput" placeholder="Type a message to petRO..." onkeydown="if(event.key==='Enter') sendMessage()">
-      <button class="icon-btn" id="micBtn" onclick="toggleMic()"><span style="transform: scale(1.2);">🎙️</span></button>
-      <button class="send-btn" onclick="sendMessage()">➤</button>
+        <input id="userInput" type="text" placeholder="Type a message..." autocomplete="off">
+        <button id="ttsBtn" class="icon-btn" onclick="stopTTS()">🔊</button>
+        <button id="sendBtn" class="send-btn">➤</button>
     </div>
   </div>
 </div>
@@ -403,25 +412,68 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 <div id="settingsModal">
   <div class="settings-sheet">
     <div class="sheet-handle"></div>
-    <div class="settings-title">⚙ petRO Settings</div>
+    <div class="settings-title">⚙ petRO Settings System</div>
     
     <div class="settings-row">
-      <div class="settings-label">Gemini API Key</div>
+      <span class="settings-label">Gemini API Token Key</span>
       <div class="settings-input-wrap">
-        <input type="password" id="apiKeyInput" class="settings-input" placeholder="AIZAcy...">
-        <button class="eye-btn" onclick="toggleKeyVisibility()">👁️</button>
+        <input id="apiKeyInput" class="settings-input" type="password" placeholder="AIzaSy...">
+        <button id="eyeBtn" class="eye-btn">👁</button>
       </div>
+      <div id="keyStatus" class="key-status bad">No key saved</div>
     </div>
-    
+
     <div class="settings-row">
-      <button class="save-btn" onclick="saveSettings()">Save Configuration</button>
+      <span class="settings-label">Owner Name Registration</span>
+      <input id="userNameInput" class="settings-input" type="text" placeholder="Enter name...">
     </div>
+
+    <div class="settings-row">
+      <span class="settings-label">Personality Aesthetic Driver</span>
+      <select id="themeSelect" class="settings-input" style="font-family:'Nunito';">
+        <option value="default">Default Companion (Blue)</option>
+        <option value="dog">Hyper Puppy (Orange)</option>
+        <option value="terminator">T-800 Cybernetic (Red)</option>
+        <option value="monkey">Cheeky Monkey (Green)</option>
+        <option value="starwars">Astromech Droid (Cyan)</option>
+        <option value="transformer">Optimus Prime (Crimson)</option>
+      </select>
+    </div>
+
+    <div class="settings-row">
+      <span class="settings-label">Continuous Loop Wake Word Mic</span>
+      <select id="followUpSelect" class="settings-input" style="font-family:'Nunito';">
+        <option value="0">Disabled (Manual updates)</option>
+        <option value="1">Enabled Always (Continuous conversation loop)</option>
+      </select>
+    </div>
+
+    <div class="settings-row">
+      <span class="settings-label">Optical File Scanner</span>
+      <input id="fileInput" type="file" accept="image/*" onchange="handleFileUpload(event)">
+    </div>
+
+    <div class="settings-row">
+      <span class="settings-label">Bluetooth Serial Information</span>
+      <div class="ble-info">Device Mapping Name: petRO</div>
+    </div>
+
+    <hr class="settings-divider">
     
-    <button class="close-sheet" onclick="closeSettings()">Close</button>
+    <button id="saveKeyBtn" class="save-btn">Apply & Close Settings</button>
+    <button id="clearKeyBtn" class="danger-btn">Wipe API Token Key</button>
+    <button id="closeSettingsBtn" class="close-sheet">Cancel</button>
   </div>
 </div>
 
-<div id="toast">Notification text</div>
+<div id="toast">Message status updated</div>
 
+<script src="script.js"></script>
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+    if (typeof initCamera === 'function') initCamera();
+    if (typeof loadHistory === 'function') loadHistory();
+});
+</script>
 </body>
 </html>
