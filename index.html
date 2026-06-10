@@ -8,8 +8,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#090d18">
 <link rel="manifest" href="manifest.json">
-<title>petRO</title>
-<link class="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/robot/default/48px.svg">
+<title>petRO Dashboard</title>
+<link rel="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/robot/default/48px.svg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;900&family=Space+Mono:wght@400;700&display=swap');
 
@@ -105,11 +105,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   #chatSection { flex:1; min-height:100svh; }
 }
 
-/* ── D-PAD & MINI PETRO ── */
+/* ── D-PAD & MINI PLAYER ── */
 #normalControls { display: flex; flex-direction: column; gap: 14px; }
 .dpad { display:grid; grid-template-areas:". up ." "left stop right" ". down ."; gap:8px; justify-content:center; }
 .dp { width:58px; height:58px; border-radius:16px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:1.3rem; cursor:pointer; transition:all 0.1s; display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; touch-action: manipulation; }
-.dp:active, .dp.pressed { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.9); }
+.dp:active,.dp.pressed { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.9); }
 .dp[data-d=forward]  { grid-area:up; }
 .dp[data-d=backward] { grid-area:down; }
 .dp[data-d=left]     { grid-area:left; }
@@ -120,7 +120,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .act { padding:12px 6px; border-radius:14px; border:1px solid var(--border); background:var(--card); color:var(--text); font-family:'Nunito',sans-serif; font-size:0.82rem; font-weight:700; cursor:pointer; transition:all 0.1s; display:flex; align-items:center; justify-content:center; gap:5px; touch-action: manipulation; }
 .act:active { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.96); }
 
-/* Mini petRO for YouTube Mode */
 #miniPetroArea { display:none; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:15px; text-align:center; opacity:0; transition: opacity 0.5s; }
 .mini-petro-svg { width: 120px; height: 120px; animation: badge-pulse 2s infinite; border-radius: 50%; background: var(--card); border: 2px solid var(--theme-color); padding: 10px; }
 .mini-title { font-size: 1.1rem; font-weight: 700; color: var(--theme-color); }
@@ -181,15 +180,15 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .settings-label { font-size:0.72rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
 .settings-input-wrap { position:relative; display:flex; align-items:center; }
 .settings-input {
-  width:100%; background:var(--card); border:1px solid var(--border); border-radius:10px;
+  flex:1; background:var(--card); border:1px solid var(--border); border-radius:10px;
   color:var(--text); font-family:'Space Mono',monospace; font-size:0.78rem;
-  padding:10px 12px; outline:none; transition:border-color 0.15s; box-sizing: border-box;
+  padding:10px 12px; outline:none; transition:border-color 0.15s;
 }
 .settings-input[type="password"] { padding-right: 40px; }
 .settings-input:focus { border-color:var(--theme-color); }
 .settings-input::placeholder { color:var(--muted); font-family:'Nunito',sans-serif; }
 .eye-btn { position:absolute; right:10px; background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:0; }
-.save-btn { padding:10px 20px; border-radius:10px; border:none; background:var(--theme-color); color:#fff; font-family:'Nunito',sans-serif; font-size:0.88rem; font-weight:700; cursor:pointer; transition:all 0.12s; text-align: center; }
+.save-btn { padding:10px 20px; border-radius:10px; border:none; background:var(--theme-color); color:#fff; font-family:'Nunito',sans-serif; font-size:0.88rem; font-weight:700; cursor:pointer; transition:all 0.12s; }
 .save-btn:active { transform:scale(0.97); }
 .key-status { font-size:0.75rem; padding:6px 10px; border-radius:8px; }
 .key-status.ok  { background:rgba(34,211,160,0.1); color:var(--green); border:1px solid rgba(34,211,160,0.2); }
@@ -204,7 +203,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%) translateY(70px); background:var(--card); border:1px solid var(--border); border-radius:12px; padding:8px 16px; font-size:0.8rem; transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1); z-index:999; pointer-events:none; max-width:300px; text-align:center; }
 #toast.show { transform:translateX(-50%) translateY(0); }
 
-/* ── MEMORY INDICATOR ── */
 #memoryPill { font-size:0.6rem; color:var(--muted); text-align:center; padding:2px 8px; opacity:0.6; }
 
 /* ── YOUTUBE API OVERLAY ── */
@@ -215,23 +213,19 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 #ytHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: var(--card); border-bottom: 1px solid var(--border); }
 #ytPlayerDiv { flex: 1; border: none; width: 100%; }
 .close-yt-btn { background: var(--red); color: white; border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }
-
-/* Structural Camera Element Styles */
-#webcamView { position: absolute; bottom: 10px; left: 10px; width: 60px; height: 45px; border-radius: 4px; transform: scaleX(-1); opacity: 0.15; object-fit: cover; pointer-events: none; }
-#uploadPreviewImg { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; }
 </style>
 <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
 
 <div id="topbar">
-  <div class="logo">pet<span>RO</span></div>
+  <div class="logo" id="logoText">pet<span>RO</span></div>
   <div class="topbar-right">
-    <div class="badge"            id="fsBtn"           onclick="toggleFullscreen()"   title="Toggle Fullscreen">⛶ FS</div>
-    <div class="badge mic-off"    id="micBadge"        onclick="toggleAlwaysOnMic()"  title="Toggle wake word mic">🎤 OFF</div>
-    <div class="badge key-missing" id="keyBadge"       onclick="openSettings()"       title="Gemini API key">🔑 KEY</div>
-    <div class="badge ble-off"    id="bleBtn"          onclick="toggleBLE()"          title="Connect to petRO BLE">⚫ BLE</div>
-    <div class="badge"            id="settingsBtn"     onclick="openSettings()"       style="color:var(--muted)">⚙</div>
+    <div class="badge"            id="fsBtn"     onclick="toggleFullscreen()"   title="Toggle Fullscreen">⛶ FS</div>
+    <div class="badge mic-off"    id="micBadge"  onclick="toggleAlwaysOnMic()"  title="Toggle wake word mic">🎤 OFF</div>
+    <div class="badge key-missing" id="keyBadge" onclick="openSettings()"       title="Gemini API key">🔑 KEY</div>
+    <div class="badge ble-off"    id="bleBtn"    onclick="toggleBLE()"          title="Connect to BLE">⚫ BLE</div>
+    <div class="badge"            id="settingsBtn" onclick="openSettings()"     style="color:var(--muted)">⚙</div>
   </div>
 </div>
 
@@ -318,7 +312,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
           <g id="theme-dog" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 40 30 C -20 30, -30 160, 10 180 C 40 160, 50 100, 55 50 Z" fill="#b07a48" /><path d="M 260 30 C 320 30, 330 160, 290 180 C 260 160, 250 100, 245 50 Z" fill="#b07a48" /><path d="M 135 125 Q 150 120 165 125 L 155 140 Q 150 145 145 140 Z" fill="#1a1a1a" /><circle cx="146" cy="128" r="3" fill="#ffffff" opacity="0.4"/></g>
           <g id="theme-monkey" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><circle cx="10" cy="100" r="32" fill="#5d4037" /><circle cx="15" cy="100" r="18" fill="#a1887f" /><circle cx="290" cy="100" r="32" fill="#5d4037" /><circle cx="285" cy="100" r="18" fill="#a1887f" /><path d="M 130 18 Q 150 -15 170 18 Q 160 25 150 25 Q 140 25 130 18 Z" fill="#5d4037" /></g>
           <g id="theme-terminator" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 10 80 L 30 40 L 70 20 L 60 90 Z" fill="#333" stroke="#111" stroke-width="2" opacity="0.9"/><line x1="30" y1="40" x2="10" y2="100" stroke="#111" stroke-width="3" /><path d="M 130 5 L 170 5 L 160 30 L 140 30 Z" fill="#555" stroke="#222" stroke-width="2" /><ellipse cx="235" cy="88" rx="66" ry="66" fill="none" stroke="#ff0000" stroke-width="6" opacity="0.8"/><circle cx="235" cy="88" r="34" fill="none" stroke="#ff0000" stroke-width="2" opacity="0.6"/><line x1="235" y1="20" x2="235" y2="50" stroke="#ff0000" stroke-width="2" opacity="0.7"/><line x1="235" y1="126" x2="235" y2="156" stroke="#ff0000" stroke-width="2" opacity="0.7"/><line x1="167" y1="88" x2="197" y2="88" stroke="#ff0000" stroke-width="2" opacity="0.7"/><line x1="273" y1="88" x2="303" y2="88" stroke="#ff0000" stroke-width="2" opacity="0.7"/></g>
-          <g id="theme-starwars" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 30 25 Q 150 -15 270 25 L 260 40 Q 150 5 40 40 Z" fill="#0055ff" /><rect x="130" y="5" width="40" height="15" fill="#e0e0e0" /><circle cx="150" cy="30" r="18" fill="#222" stroke="silver" stroke-width="3" /><circle cx="150" cy="30" r="6" fill="#ff0000" /><rect x="15" y="110" width="20" height="50" fill="#0055ff" rx="4" /><rect x="265" y="110" width="20" height="50" fill="#0055ff" rx="4" /><line x1="15" y1="120" x2="35" y2="120" stroke="#111" stroke-width="2"/><line x1="265" y1="120" x2="285" y2="120" stroke="#111" stroke-width="2"/></g>
+          <g id="theme-starwars" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><path d="M 30 25 Q 150 -15 270 25 L 260 40 Q 150 5 40 40 Z" fill="#0055ff" /><rect x="130" y="5" width="40" height="15" fill="#e0e0e0" /><circle cx="150" cy="30" r="18" fill="#222" stroke="#silver" stroke-width="3" /><circle cx="150" cy="30" r="6" fill="#ff0000" /><rect x="15" y="110" width="20" height="50" fill="#0055ff" rx="4" /><rect x="265" y="110" width="20" height="50" fill="#0055ff" rx="4" /><line x1="15" y1="120" x2="35" y2="120" stroke="#111" stroke-width="2"/><line x1="265" y1="120" x2="285" y2="120" stroke="#111" stroke-width="2"/></g>
           <g id="theme-transformer" style="opacity: 0; transition: opacity 0.3s; pointer-events: none;"><polygon points="140,5 160,5 160,40 150,60 140,40" fill="#e0e0e0" stroke="#888" stroke-width="2" /><polygon points="145,15 155,15 155,35 150,45 145,35" fill="#0044cc" /><path d="M 20 15 L 55 5 L 65 40 L 10 120 L 10 40 Z" fill="#0044cc" stroke="#003399" stroke-width="2"/><path d="M 280 15 L 245 5 L 235 40 L 290 120 L 290 40 Z" fill="#0044cc" stroke="#003399" stroke-width="2"/><rect x="0" y="45" width="12" height="65" fill="#e0e0e0" stroke="#888" stroke-width="1"/><rect x="288" y="45" width="12" height="65" fill="#e0e0e0" stroke="#888" stroke-width="1"/><path d="M 80 145 L 150 120 L 220 145 L 210 210 L 150 220 L 90 210 Z" fill="#b0b5ba" stroke="#555" stroke-width="3" /><line x1="100" y1="155" x2="200" y2="155" stroke="#666" stroke-width="4" stroke-linecap="round"/><line x1="105" y1="170" x2="195" y2="170" stroke="#666" stroke-width="4" stroke-linecap="round"/><line x1="110" y1="185" x2="190" y2="185" stroke="#666" stroke-width="4" stroke-linecap="round"/></g>
         </g>
 
@@ -332,8 +326,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   <div class="scroll-hint" onclick="document.getElementById('controlsScreen').scrollIntoView({behavior:'smooth'})">
     <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg> Controls
   </div>
-  <video id="webcamView" autoplay playsinline muted></video>
-  <canvas id="captureCanvas" style="display:none;"></canvas>
 </div>
 
 <div id="controlsScreen">
@@ -342,11 +334,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div id="normalControls">
       <div class="section-label">🕹 Direct Controls</div>
       <div class="dpad">
-        <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()">▲</button>
-        <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()">◀</button>
+        <button class="dp" data-d="forward"  onpointerdown="startDirectMove('F')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▲</button>
+        <button class="dp" data-d="left"     onpointerdown="startDirectMove('L')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">◀</button>
         <button class="dp" data-d="stop"     onclick="stopDirectMove()">■</button>
-        <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()">▶</button>
-        <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()">▼</button>
+        <button class="dp" data-d="right"    onpointerdown="startDirectMove('R')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▶</button>
+        <button class="dp" data-d="backward" onpointerdown="startDirectMove('B')" onpointerup="stopDirectMove()" onpointerleave="stopDirectMove()">▼</button>
       </div>
       <div class="action-grid">
         <button class="act" onclick="doAction('dance')">💃 Dance</button>
@@ -365,7 +357,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         <circle cx="70" cy="45" r="15" fill="var(--theme-color)"/>
         <path d="M 35 70 Q 50 85 65 70" fill="none" stroke="var(--theme-color)" stroke-width="4" stroke-linecap="round"/>
       </svg>
-      <div class="mini-title">petRO is chilling</div>
+      <div class="mini-title">Robot is chilling</div>
       <div class="mini-sub">D-Pad disabled while video plays.</div>
     </div>
 
@@ -375,16 +367,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     
     <div id="ytContainer">
       <div id="ytHeader">
-        <span style="font-weight: bold; font-size: 0.8rem;">petRO Media Player</span>
+        <span style="font-weight: bold; font-size: 0.8rem;">Media Player</span>
         <button class="close-yt-btn" onclick="closeYouTube()">Close</button>
       </div>
       <div id="ytPlayerDiv"></div>
     </div>
 
-    <div class="section-label" style="padding-top:14px;">💬 Chat with petRO</div>
+    <div class="section-label" style="padding-top:14px;">💬 Chat</div>
     <div id="messages">
       <div class="msg bot">
-        <div class="msg-label">petRO 🤖</div>
+        <div class="msg-label" id="welcomeLabel">petRO 🤖</div>
         <div class="msg-bubble">Hi! Tap <b>⚙ Settings</b> to customize me, add your API key, connect BLE and let's chat!</div>
       </div>
     </div>
@@ -395,16 +387,19 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
       <button class="sug" onclick="sendSug('Play lofi hip hop on youtube')">🎵 Lofi</button>
       <button class="sug" onclick="sendSug('Draw a circle')">⭕ Circle</button>
     </div>
-    
     <div id="uploadPreviewBar" style="display:none;padding:6px 12px;background:var(--card);border-top:1px solid var(--border);align-items:center;gap:10px;">
-        <img id="uploadPreviewImg" src="" alt="preview">
-        <span style="font-size:11px; color:var(--text); flex:1;">Image attached</span>
-        <button onclick="clearUploadedImage()" style="background:none; border:none; color:var(--red); cursor:pointer;">✕</button>
+      <div style="position:relative;width:42px;height:42px;flex-shrink:0;">
+        <img id="previewImg" src="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;border:1px solid var(--border);">
+        <button onclick="clearUploadedImage()" style="position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-weight:bold;">×</button>
+      </div>
+      <span style="font-size:0.75rem;color:var(--text);opacity:0.7;">Ready to send with next message…</span>
     </div>
     <div id="inputBar">
-        <input id="userInput" type="text" placeholder="Type a message..." autocomplete="off">
-        <button id="ttsBtn" class="icon-btn" onclick="stopTTS()">🔊</button>
-        <button id="sendBtn" class="send-btn">➤</button>
+      <button class="icon-btn" onclick="document.getElementById('fileInput').click()" title="Attach image">🖼️</button>
+      <input type="file" id="fileInput" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
+      <input type="text" id="userInput" placeholder="Chat..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="icon-btn" id="ttsBtn" onclick="stopTTS()" title="Stop speaking">🔊</button>
+      <button class="send-btn" id="sendBtn" onclick="sendChat()">➤</button>
     </div>
   </div>
 </div>
@@ -412,68 +407,92 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 <div id="settingsModal">
   <div class="settings-sheet">
     <div class="sheet-handle"></div>
-    <div class="settings-title">⚙ petRO Settings System</div>
-    
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="settings-title">⚙ Configuration</div>
+      <button class="close-sheet" onclick="closeSettings()">✕ Close</button>
+    </div>
+
     <div class="settings-row">
-      <span class="settings-label">Gemini API Token Key</span>
+      <div class="settings-label">🤖 Pet Name</div>
       <div class="settings-input-wrap">
-        <input id="apiKeyInput" class="settings-input" type="password" placeholder="AIzaSy...">
-        <button id="eyeBtn" class="eye-btn">👁</button>
+        <input class="settings-input" type="text" id="petNameInput" placeholder="Name your pet (e.g. petRO)">
       </div>
-      <div id="keyStatus" class="key-status bad">No key saved</div>
     </div>
-
     <div class="settings-row">
-      <span class="settings-label">Owner Name Registration</span>
-      <input id="userNameInput" class="settings-input" type="text" placeholder="Enter name...">
+      <div class="settings-label">👤 Your Identity</div>
+      <div class="settings-input-wrap">
+        <input class="settings-input" type="text" id="userNameInput" placeholder="Your name">
+      </div>
     </div>
-
     <div class="settings-row">
-      <span class="settings-label">Personality Aesthetic Driver</span>
-      <select id="themeSelect" class="settings-input" style="font-family:'Nunito';">
-        <option value="default">Default Companion (Blue)</option>
-        <option value="dog">Hyper Puppy (Orange)</option>
-        <option value="terminator">T-800 Cybernetic (Red)</option>
-        <option value="monkey">Cheeky Monkey (Green)</option>
-        <option value="starwars">Astromech Droid (Cyan)</option>
-        <option value="transformer">Optimus Prime (Crimson)</option>
+      <div class="settings-label">🎭 Theme</div>
+      <select id="themeSelect" class="settings-input" onchange="applyTheme()">
+        <option value="default">Default (Friendly Robot)</option>
+        <option value="dog">Robot Dog</option>
+        <option value="terminator">Terminator T-800</option>
+        <option value="monkey">Cheeky Monkey</option>
+        <option value="starwars">Astromech (Star Wars)</option>
+        <option value="transformer">Optimus Prime</option>
       </select>
-    </div>
-
-    <div class="settings-row">
-      <span class="settings-label">Continuous Loop Wake Word Mic</span>
-      <select id="followUpSelect" class="settings-input" style="font-family:'Nunito';">
-        <option value="0">Disabled (Manual updates)</option>
-        <option value="1">Enabled Always (Continuous conversation loop)</option>
-      </select>
-    </div>
-
-    <div class="settings-row">
-      <span class="settings-label">Optical File Scanner</span>
-      <input id="fileInput" type="file" accept="image/*" onchange="handleFileUpload(event)">
-    </div>
-
-    <div class="settings-row">
-      <span class="settings-label">Bluetooth Serial Information</span>
-      <div class="ble-info">Device Mapping Name: petRO</div>
+      <button class="save-btn" onclick="savePersonalization()" style="margin-top:4px;">💾 Save Identity & Theme</button>
     </div>
 
     <hr class="settings-divider">
-    
-    <button id="saveKeyBtn" class="save-btn">Apply & Close Settings</button>
-    <button id="clearKeyBtn" class="danger-btn">Wipe API Token Key</button>
-    <button id="closeSettingsBtn" class="close-sheet">Cancel</button>
+
+    <div class="settings-row">
+      <div class="settings-label">🔑 Gemini API Key</div>
+      <div class="settings-input-wrap">
+        <input class="settings-input" type="password" id="apiKeyInput" placeholder="Paste Gemini API key…" autocomplete="off" spellcheck="false">
+        <button class="eye-btn" id="eyeBtn" onclick="toggleKeyVisibility()">👁</button>
+      </div>
+      <div id="keyStatus" class="key-status bad">No key saved</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="save-btn" onclick="saveApiKey()">💾 Save Key</button>
+        <button class="danger-btn" onclick="clearApiKey()">🗑 Remove Key</button>
+      </div>
+    </div>
+
+    <hr class="settings-divider">
+
+    <div class="settings-row">
+      <div class="settings-label">⏱️ Follow-up Window</div>
+      <select id="followUpSelect" class="settings-input" onchange="savePersonalization()">
+        <option value="0">None (Say wake word every time)</option>
+        <option value="5000">5 Seconds</option>
+        <option value="10000">10 Seconds</option>
+        <option value="15000">15 Seconds</option>
+      </select>
+    </div>
+
+    <hr class="settings-divider">
+
+    <div class="settings-row">
+      <div class="settings-label">📊 API Usage & Cost Estimate</div>
+      <div class="ble-info" id="usageBox" style="line-height: 1.5;">
+        Requests: <b>0</b><br>
+        Tokens: <b>0</b> In / <b>0</b> Out<br>
+        Est. Cost: <b>$0.00000</b>
+      </div>
+      <button class="danger-btn" onclick="clearUsage()" style="margin-top:4px;">🗑 Reset Counters</button>
+    </div>
+
+    <hr class="settings-divider">
+
+    <div class="settings-row">
+      <div class="settings-label">📡 Bluetooth (BLE)</div>
+      <div class="ble-info" id="bleInfoBox">Status: Not connected</div>
+      <div style="display:flex;gap:8px;">
+        <button class="save-btn" onclick="closeSettings();toggleBLE()">🔗 Connect BLE</button>
+        <button class="danger-btn" onclick="disconnectBLE()">✂ Disconnect</button>
+      </div>
+    </div>
   </div>
 </div>
 
-<div id="toast">Message status updated</div>
+<div id="toast"></div>
+<video id="webcamView" autoplay playsinline style="display:none;"></video>
+<canvas id="captureCanvas" style="display:none;"></canvas>
 
 <script src="script.js"></script>
-<script>
-window.addEventListener('DOMContentLoaded', () => {
-    if (typeof initCamera === 'function') initCamera();
-    if (typeof loadHistory === 'function') loadHistory();
-});
-</script>
 </body>
 </html>
