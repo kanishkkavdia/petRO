@@ -124,101 +124,139 @@ function clearUsage() {
 // ════════════════════════════════════════════════════════
 // BLUETOOTH
 // ════════════════════════════════════════════════════════
+
+// --- Reconnect state (declared before use) ---
+let bleIntentionalDisconnect = false;
+let bleReconnectTimer = null;
+let bleReconnectAttempts = 0;
+const BLE_MAX_RECONNECT = 8;
+
+// --- Mutex queue: only ONE write in-flight at a time ---
+// Each call waits for the previous to fully resolve before starting.
+let _bleQueueTail = Promise.resolve();
+function bleSend(cmd) {
+  // Chain onto the tail; capture the new tail so next call waits on THIS one
+  const next = _bleQueueTail.then(() => _bleWrite(cmd));
+  _bleQueueTail = next.catch(() => {}); // prevent unhandled rejection on the shared tail
+  return next; // caller gets a promise that resolves/rejects for THIS write only
+}
+
+async function _bleWrite(cmd) {
+  if (!bleDevice || bleIntentionalDisconnect) return;
+
+  // If GATT layer dropped, reconnect before writing
+  if (!bleDevice.gatt.connected) {
+    try {
+      const server  = await bleDevice.gatt.connect();
+      const service = await server.getPrimaryService(BLE_SERVICE);
+      bleCmdChar    = await service.getCharacteristic(BLE_CMD_CHAR);
+      _setBLEConnected(true);
+    } catch(e) {
+      _setBLEConnected(false);
+      throw e; // propagate so caller knows the write didn't happen
+    }
+  }
+
+  if (!bleCmdChar) return;
+  try {
+    await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd));
+  } catch(e) {
+    // write failed — GATT probably dropped right now; let onBleDisconnect handle it
+    _setBLEConnected(false);
+    bleCmdChar = null;
+    throw e;
+  }
+}
+
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
   if (!navigator.bluetooth) { toast('❌ Web Bluetooth not supported.'); return; }
   setBLE(null); toast('🔍 Scanning…');
   try { bleDevice = await navigator.bluetooth.requestDevice({ filters: [{ name: BLE_NAME }], optionalServices: [BLE_SERVICE] }); } 
   catch(e1) { if (e1.name === 'AbortError') { setBLE(false); return; } try { bleDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE] }); } catch(e2) { setBLE(false); toast('❌ No BLE devices found.'); return; } }
+  bleIntentionalDisconnect = false;
   bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
   toast(`🔗 Connecting to ${bleDevice.name}…`);
-  try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); toast(`✅ Connected!`); updateBleInfoBox(); resetInactivity(); } 
-  catch(e) { setBLE(false); bleDevice = null; toast('❌ Connection failed.'); }
+  try {
+    const server  = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(BLE_SERVICE);
+    bleCmdChar    = await service.getCharacteristic(BLE_CMD_CHAR);
+    bleReconnectAttempts = 0;
+    setBLE(true); toast(`✅ Connected!`); updateBleInfoBox(); resetInactivity();
+  } catch(e) { setBLE(false); bleDevice = null; toast('❌ Connection failed.'); }
 }
-function disconnectBLE() { bleReconnectEnabled = false; try { bleDevice?.gatt?.disconnect(); } catch {} bleDevice = null; bleCmdChar = null; setBLE(false); toast('Disconnected'); updateBleInfoBox(); }
 
-let bleReconnectEnabled = false;
-let bleReconnectTimer = null;
-let bleReconnectAttempts = 0;
-const BLE_MAX_RECONNECT = 5;
+function disconnectBLE() {
+  bleIntentionalDisconnect = true;
+  clearTimeout(bleReconnectTimer);
+  try { bleDevice?.gatt?.disconnect(); } catch {}
+  bleDevice = null; bleCmdChar = null;
+  setBLE(false); toast('Disconnected'); updateBleInfoBox();
+}
 
-function onBleDisconnect() { 
-  if (!bleConnected && !bleReconnectEnabled) return; 
-  setBLE(false); bleCmdChar = null; updateBleInfoBox();
-  if (bleReconnectEnabled && bleDevice && bleReconnectAttempts < BLE_MAX_RECONNECT) {
-    bleReconnectAttempts++;
-    const delay = Math.min(1000 * bleReconnectAttempts, 8000); // back-off: 1s, 2s, 3s…
-    toast(`⚠️ Disconnected. Reconnecting (${bleReconnectAttempts}/${BLE_MAX_RECONNECT})…`);
-    bleReconnectTimer = setTimeout(attemptReconnect, delay);
-  } else {
-    toast('⚠️ petRO disconnected.');
+function onBleDisconnect() {
+  if (bleIntentionalDisconnect) return; // user pressed disconnect — don't reconnect
+  _setBLEConnected(false);
+  bleCmdChar = null;
+  updateBleInfoBox();
+  // Start back-off reconnect
+  bleReconnectAttempts = 0;
+  _scheduleReconnect();
+}
+
+function _scheduleReconnect() {
+  if (bleIntentionalDisconnect || !bleDevice) return;
+  if (bleReconnectAttempts >= BLE_MAX_RECONNECT) {
+    toast('❌ Could not reconnect after ' + BLE_MAX_RECONNECT + ' tries. Tap BLE to retry.');
+    return;
   }
+  bleReconnectAttempts++;
+  const delay = Math.min(500 * bleReconnectAttempts, 6000); // 0.5s, 1s, 1.5s … max 6s
+  toast(`⚠️ Disconnected. Reconnecting (${bleReconnectAttempts}/${BLE_MAX_RECONNECT})…`);
+  clearTimeout(bleReconnectTimer);
+  bleReconnectTimer = setTimeout(_attemptReconnect, delay);
 }
 
-async function attemptReconnect() {
-  if (!bleDevice || !bleReconnectEnabled) return;
+async function _attemptReconnect() {
+  if (bleIntentionalDisconnect || !bleDevice) return;
   setBLE(null);
   try {
-    const server = await bleDevice.gatt.connect();
+    const server  = await bleDevice.gatt.connect();
     const service = await server.getPrimaryService(BLE_SERVICE);
-    bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
+    bleCmdChar    = await service.getCharacteristic(BLE_CMD_CHAR);
     bleReconnectAttempts = 0;
     setBLE(true); toast('✅ Reconnected!'); updateBleInfoBox();
   } catch(e) {
-    if (bleReconnectEnabled && bleReconnectAttempts < BLE_MAX_RECONNECT) {
-      onBleDisconnect(); // triggers another attempt with increased delay
-    } else {
-      setBLE(false); toast('❌ Could not reconnect. Try manually.'); updateBleInfoBox();
-    }
+    _setBLEConnected(false);
+    _scheduleReconnect(); // try again with increased delay
   }
 }
 
-function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; bleReconnectEnabled = true; bleReconnectAttempts = 0; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
+// Sets the UI+flag WITHOUT triggering side-effects that cause more bleSend calls
+function _setBLEConnected(val) {
+  bleConnected = val;
+  const b = document.getElementById('bleBtn');
+  if (!val) { b.className = 'badge ble-off'; b.textContent = '⚫ BLE'; }
+}
+
+function setBLE(s) {
+  const b = document.getElementById('bleBtn');
+  if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; bleConnected = false; }
+  else if (s)     { b.className='badge ble-on';   b.textContent='🟢 BLE'; bleConnected = true; }
+  else            { b.className='badge ble-off';   b.textContent='⚫ BLE'; bleConnected = false; }
+}
 function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; }
-
-// BLE send queue — serialises all writes so concurrent callers never race
-let bleSendQueue = Promise.resolve();
-function bleSend(cmd) {
-  bleSendQueue = bleSendQueue.then(() => _bleSendNow(cmd)).catch(() => {});
-  return bleSendQueue;
-}
-
-async function _bleSendNow(cmd) {
-  if (!bleDevice) return;
-
-  hardwareActive = true; 
-  clearTimeout(hwTimeout); 
-  hwTimeout = setTimeout(() => hardwareActive = false, 3000);
-
-  // Reconnect if GATT dropped but device object still exists
-  if (!bleDevice.gatt.connected) {
-    setBLE(null);
-    try { 
-      const server = await bleDevice.gatt.connect(); 
-      const service = await server.getPrimaryService(BLE_SERVICE); 
-      bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); 
-      setBLE(true);
-    } catch(e) { setBLE(false); bleCmdChar = null; return; }
-  }
-
-  if (!bleCmdChar) return;
-  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } 
-  catch(e) { 
-    // write failed — flag as disconnected; auto-reconnect will handle it
-    setBLE(false); bleCmdChar = null; 
-  }
-}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ════════════════════════════════════════════════════════
 // DIRECT MOVEMENT & HARDWARE ACTIONS
 // ════════════════════════════════════════════════════════
 let isMoving = false;
-async function startDirectMove(cmd) { if (!bleConnected) { toast('⚠️ Connect BLE first!'); return; } resetInactivity(); isMoving = true; await bleSend(cmd); }
-async function stopDirectMove() { if (!isMoving || !bleConnected) return; isMoving = false; await bleSend('S'); }
+async function startDirectMove(cmd) { if (!bleDevice) { toast('⚠️ Connect BLE first!'); return; } resetInactivity(); isMoving = true; await bleSend(cmd); }
+async function stopDirectMove() { if (!isMoving || !bleDevice) return; isMoving = false; await bleSend('S'); }
 
 async function doAction(action) {
-  if (!bleConnected) { toast('⚠️ Connect BLE first!'); return; }
+  if (!bleDevice) { toast('⚠️ Connect BLE first!'); return; }
   resetInactivity();
   switch(action) { case 'nod': await bleSend('N'); await sleep(2000); break; case 'dance': await doDance(); break; case 'wander': await doWander(); break; }
 }
@@ -342,15 +380,15 @@ function detectEmotion(toolCalls, reply) {
 // YOUTUBE, GROOVE & PROPS
 // ════════════════════════════════════════════════════════
 function startGroove() {
-  if (grooveTimer || !bleConnected) return;
+  if (grooveTimer || !bleDevice) return;
   let step = 0;
   const grooveMoves = ['V', '1', '2', 'U', '7', '8', '3', '4']; 
   grooveTimer = setInterval(() => {
-     if (!isMoving && !isBusy && bleConnected) { bleSend(grooveMoves[step % grooveMoves.length]); step++; }
+     if (!isMoving && !isBusy && !hardwareActive && bleConnected) { bleSend(grooveMoves[step % grooveMoves.length]); step++; }
   }, 1800);
 }
 
-function stopGroove() { clearInterval(grooveTimer); grooveTimer = null; if (bleConnected) bleSend('E'); }
+function stopGroove() { clearInterval(grooveTimer); grooveTimer = null; if (bleDevice) bleSend('E'); }
 
 async function openYouTube(query, isEntertainment = false) {
   toast(`🔍 Searching YouTube for "${query}"...`);
@@ -422,7 +460,7 @@ function showProp(propName) {
 }
 
 async function doPattern(pattern) {
-  toast(`Executing ${pattern}!`); if (!bleConnected) return;
+  toast(`Executing ${pattern}!`); if (!bleDevice) return;
   hardwareActive = true; clearTimeout(hwTimeout);
   if (pattern === 'circle') { await bleSend('L'); await sleep(3500); await bleSend('S'); } 
   else if (pattern === 'rectangle') { for (let i=0; i<4; i++) { await bleSend('F'); await sleep(1000); await bleSend('R'); await sleep(600); } await bleSend('S'); } 
@@ -572,7 +610,7 @@ function setEmotion(name, force = false) {
   clearTimeout(emotionResetTimer);
   if (name !== 'neutral' && name !== 'sleeping') emotionResetTimer = setTimeout(() => setEmotion('neutral'), 5000);
 
-  if (bleConnected && !force && name !== 'sleeping') {
+  if (bleConnected && !force && name !== 'sleeping' && !hardwareActive) {
       const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X', curious:'X', surprised:'H', shy:'N', loving:'H' };
       if (hwMap[name]) bleSend(hwMap[name]);
   }
@@ -604,7 +642,7 @@ function resetInactivity() {
 
 function scheduleIdleMove() {
   idleMoveTimer = setTimeout(() => {
-    if (!isSleeping && !isBusy && bleConnected && !isVideoPlaying) {
+    if (!isSleeping && !isBusy && bleDevice && !isVideoPlaying) {
        // Occasional physical wander vs smaller moves
        if (Math.random() > 0.85) {
            doWander(); 
