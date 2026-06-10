@@ -76,7 +76,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .face-wrap { width: min(380px, 92vw); flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; }
 .face-wrap svg { width: 100%; height: auto; display: block; overflow: visible; transition: all 0.3s; }
 
-/* ── Listening Status Text (Replaces Overlay) ── */
+/* ── Listening Status Text ── */
 #listeningStatus {
   position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
   font-size: 0.8rem; font-weight: 700; color: var(--theme-color);
@@ -121,8 +121,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .act:active { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.96); }
 
 /* Mini petRO for YouTube Mode */
-#miniPetroArea { display:none; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:15px; text-align:center; opacity:0; transition: opacity 0.5s; }
-.mini-petro-svg { width: 120px; height: 120px; animation: badge-pulse 2s infinite; border-radius: 50%; background: var(--card); border: 2px solid var(--theme-color); padding: 10px; }
+#miniPetroArea { display:none; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:15px; text-align:center; transition: opacity 0.5s; }
+.mini-petro-svg { width: 120px; height: 120px; border-radius: 50%; background: var(--card); border: 2px solid var(--theme-color); padding: 10px; }
 .mini-title { font-size: 1.1rem; font-weight: 700; color: var(--theme-color); }
 .mini-sub { font-size: 0.8rem; color: var(--muted); padding: 0 10px; }
 
@@ -355,11 +355,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <div id="miniPetroArea">
       <div class="section-label">🎬 Media Mode</div>
       <svg class="mini-petro-svg" viewBox="0 0 100 100">
-        <circle cx="30" cy="45" r="15" fill="var(--theme-color)"/>
-        <circle cx="70" cy="45" r="15" fill="var(--theme-color)"/>
-        <path d="M 35 70 Q 50 85 65 70" fill="none" stroke="var(--theme-color)" stroke-width="4" stroke-linecap="round"/>
+        <circle id="mini-ml-iris" cx="30" cy="45" r="10" fill="var(--theme-color)"/>
+        <rect id="mini-ml-lid" x="15" y="10" width="30" height="2" fill="var(--card)" stroke="none"/>
+        <circle id="mini-mr-iris" cx="70" cy="45" r="10" fill="var(--theme-color)"/>
+        <rect id="mini-mr-lid" x="55" y="10" width="30" height="2" fill="var(--card)" stroke="none"/>
+        <path id="mini-mouth" d="M 35 70 Q 50 85 65 70" fill="none" stroke="var(--theme-color)" stroke-width="4" stroke-linecap="round"/>
       </svg>
-      <div class="mini-title">petRO is chilling</div>
+      <div class="mini-title" id="miniPetroStatus">petRO is chilling</div>
       <div class="mini-sub">D-Pad disabled while video plays.</div>
     </div>
 
@@ -475,7 +477,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <hr class="settings-divider">
 
     <div class="settings-row">
-      <div class="settings-label">📡 Bluetooth (BLE)</div>
+      <div class="settings-label">🗑️ Bluetooth (BLE)</div>
       <div class="ble-info" id="bleInfoBox">Status: Not connected</div>
       <div style="display:flex;gap:8px;">
         <button class="save-btn" onclick="closeSettings();toggleBLE()">🔗 Connect BLE</button>
