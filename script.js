@@ -135,19 +135,78 @@ async function toggleBLE() {
   try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); toast(`✅ Connected!`); updateBleInfoBox(); resetInactivity(); } 
   catch(e) { setBLE(false); bleDevice = null; toast('❌ Connection failed.'); }
 }
-function disconnectBLE() { try { bleDevice?.gatt?.disconnect(); } catch {} bleDevice = null; bleCmdChar = null; setBLE(false); toast('Disconnected'); updateBleInfoBox(); }
-function onBleDisconnect() { if (!bleConnected) return; setBLE(false); toast('⚠️ petRO disconnected.'); bleCmdChar = null; updateBleInfoBox(); }
-function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
+function disconnectBLE() { bleReconnectEnabled = false; try { bleDevice?.gatt?.disconnect(); } catch {} bleDevice = null; bleCmdChar = null; setBLE(false); toast('Disconnected'); updateBleInfoBox(); }
+
+let bleReconnectEnabled = false;
+let bleReconnectTimer = null;
+let bleReconnectAttempts = 0;
+const BLE_MAX_RECONNECT = 5;
+
+function onBleDisconnect() { 
+  if (!bleConnected && !bleReconnectEnabled) return; 
+  setBLE(false); bleCmdChar = null; updateBleInfoBox();
+  if (bleReconnectEnabled && bleDevice && bleReconnectAttempts < BLE_MAX_RECONNECT) {
+    bleReconnectAttempts++;
+    const delay = Math.min(1000 * bleReconnectAttempts, 8000); // back-off: 1s, 2s, 3s…
+    toast(`⚠️ Disconnected. Reconnecting (${bleReconnectAttempts}/${BLE_MAX_RECONNECT})…`);
+    bleReconnectTimer = setTimeout(attemptReconnect, delay);
+  } else {
+    toast('⚠️ petRO disconnected.');
+  }
+}
+
+async function attemptReconnect() {
+  if (!bleDevice || !bleReconnectEnabled) return;
+  setBLE(null);
+  try {
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(BLE_SERVICE);
+    bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
+    bleReconnectAttempts = 0;
+    setBLE(true); toast('✅ Reconnected!'); updateBleInfoBox();
+  } catch(e) {
+    if (bleReconnectEnabled && bleReconnectAttempts < BLE_MAX_RECONNECT) {
+      onBleDisconnect(); // triggers another attempt with increased delay
+    } else {
+      setBLE(false); toast('❌ Could not reconnect. Try manually.'); updateBleInfoBox();
+    }
+  }
+}
+
+function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; bleReconnectEnabled = true; bleReconnectAttempts = 0; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
 function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; }
 
-async function bleSend(cmd) {
-  if (!bleCmdChar) return;
+// BLE send queue — serialises all writes so concurrent callers never race
+let bleSendQueue = Promise.resolve();
+function bleSend(cmd) {
+  bleSendQueue = bleSendQueue.then(() => _bleSendNow(cmd)).catch(() => {});
+  return bleSendQueue;
+}
+
+async function _bleSendNow(cmd) {
+  if (!bleDevice) return;
+
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
   hwTimeout = setTimeout(() => hardwareActive = false, 3000);
 
-  if (!bleDevice?.gatt?.connected) { try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); } catch(e) { setBLE(false); return; } }
-  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; }
+  // Reconnect if GATT dropped but device object still exists
+  if (!bleDevice.gatt.connected) {
+    setBLE(null);
+    try { 
+      const server = await bleDevice.gatt.connect(); 
+      const service = await server.getPrimaryService(BLE_SERVICE); 
+      bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); 
+      setBLE(true);
+    } catch(e) { setBLE(false); bleCmdChar = null; return; }
+  }
+
+  if (!bleCmdChar) return;
+  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } 
+  catch(e) { 
+    // write failed — flag as disconnected; auto-reconnect will handle it
+    setBLE(false); bleCmdChar = null; 
+  }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -163,8 +222,20 @@ async function doAction(action) {
   resetInactivity();
   switch(action) { case 'nod': await bleSend('N'); await sleep(2000); break; case 'dance': await doDance(); break; case 'wander': await doWander(); break; }
 }
-async function doDance() { toast('💃 Dancing!'); setEmotion('excited'); for (const [cmd, ms] of DANCE_STEPS) { await bleSend(cmd); if (ms > 0) await sleep(ms); } toast('🎉 Done!'); }
-async function doWander() { toast('🗺 Wandering!'); setEmotion('focused'); await bleSend('W'); await sleep(4000); toast('✅ Done'); }
+async function doDance() { 
+  toast('💃 Dancing!'); setEmotion('excited'); 
+  hardwareActive = true; clearTimeout(hwTimeout);
+  for (const [cmd, ms] of DANCE_STEPS) { await bleSend(cmd); if (ms > 0) await sleep(ms); } 
+  hardwareActive = false;
+  toast('🎉 Done!'); 
+}
+async function doWander() { 
+  toast('🗺 Wandering!'); setEmotion('focused'); 
+  hardwareActive = true; clearTimeout(hwTimeout);
+  await bleSend('W'); await sleep(4000); 
+  hardwareActive = false;
+  toast('✅ Done'); 
+}
 
 // ════════════════════════════════════════════════════════
 // MOTION SENSORS
@@ -352,33 +423,41 @@ function showProp(propName) {
 
 async function doPattern(pattern) {
   toast(`Executing ${pattern}!`); if (!bleConnected) return;
+  hardwareActive = true; clearTimeout(hwTimeout);
   if (pattern === 'circle') { await bleSend('L'); await sleep(3500); await bleSend('S'); } 
   else if (pattern === 'rectangle') { for (let i=0; i<4; i++) { await bleSend('F'); await sleep(1000); await bleSend('R'); await sleep(600); } await bleSend('S'); } 
   else if (pattern === 'moonwalk') { for (let i=0; i<4; i++) { await bleSend('B'); await sleep(500); await bleSend('S'); await sleep(200); } } 
   else if (pattern === 'spin') { await bleSend('L'); await sleep(1500); await bleSend('S'); }
+  hardwareActive = false;
 }
 
 // ════════════════════════════════════════════════════════
 // TOOL EXECUTION
 // ════════════════════════════════════════════════════════
 async function executeTools(toolCalls) {
-  for (const tc of toolCalls) {
-    const args = tc.args || {};
-    switch(tc.name) {
-      case 'move_forward':  await startDirectMove('F'); await sleep((args.duration_seconds || 1) * 1000); await stopDirectMove(); await sleep(100); break;
-      case 'move_backward': await startDirectMove('B'); await sleep((args.duration_seconds || 1) * 1000); await stopDirectMove(); await sleep(100); break;
-      case 'turn_left':     await startDirectMove('L'); await sleep((args.duration_seconds || 0.5) * 1000); await stopDirectMove(); await sleep(100); break;
-      case 'turn_right':    await startDirectMove('R'); await sleep((args.duration_seconds || 0.5) * 1000); await stopDirectMove(); await sleep(100); break;
-      case 'stop_robot':    await stopDirectMove(); break;
-      case 'dance':         await doDance(); break;
-      case 'nod_head':      for (let i = 0; i < (args.times || 1); i++) { await doAction('nod'); } break;
-      case 'wander':        await doWander(); break;
-      case 'capture_photo': autoCapture(); break;
-      case 'search_youtube':if (args.query) await openYouTube(args.query, args.is_entertainment); break;
-      case 'call_contact':  if (args.phone_number) { toast(`📞 Calling...`); window.location.href = `tel:${args.phone_number}`; } break;
-      case 'show_prop':     if (args.prop_name) showProp(args.prop_name); break;
-      case 'perform_pattern':if(args.pattern) await doPattern(args.pattern); break;
+  if (!toolCalls.length) return;
+  hardwareActive = true; clearTimeout(hwTimeout);
+  try {
+    for (const tc of toolCalls) {
+      const args = tc.args || {};
+      switch(tc.name) {
+        case 'move_forward':  await startDirectMove('F'); await sleep((args.duration_seconds || 1) * 1000); await stopDirectMove(); await sleep(100); break;
+        case 'move_backward': await startDirectMove('B'); await sleep((args.duration_seconds || 1) * 1000); await stopDirectMove(); await sleep(100); break;
+        case 'turn_left':     await startDirectMove('L'); await sleep((args.duration_seconds || 0.5) * 1000); await stopDirectMove(); await sleep(100); break;
+        case 'turn_right':    await startDirectMove('R'); await sleep((args.duration_seconds || 0.5) * 1000); await stopDirectMove(); await sleep(100); break;
+        case 'stop_robot':    await stopDirectMove(); break;
+        case 'dance':         await doDance(); break;
+        case 'nod_head':      for (let i = 0; i < (args.times || 1); i++) { await doAction('nod'); } break;
+        case 'wander':        await doWander(); break;
+        case 'capture_photo': autoCapture(); break;
+        case 'search_youtube':if (args.query) await openYouTube(args.query, args.is_entertainment); break;
+        case 'call_contact':  if (args.phone_number) { toast(`📞 Calling...`); window.location.href = `tel:${args.phone_number}`; } break;
+        case 'show_prop':     if (args.prop_name) showProp(args.prop_name); break;
+        case 'perform_pattern':if(args.pattern) await doPattern(args.pattern); break;
+      }
     }
+  } finally {
+    hardwareActive = false;
   }
 }
 
