@@ -278,25 +278,72 @@ async function doWander() {
 // ════════════════════════════════════════════════════════
 // MOTION SENSORS
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// MOTION SENSORS
+// ════════════════════════════════════════════════════════
+let lastAccel = 0, motionSensorsbound = false;
+let motionCooldown = false; // debounce so robot's own vibrations don't re-trigger
+
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
-  } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; }
+    DeviceOrientationEvent.requestPermission()
+      .then(r => { if (r === 'granted') { motionEnabled = true; bindSensors(); updateGyroBtnState(); toast('✅ Motion Sync ON'); } else toast('❌ Permission denied'); })
+      .catch(console.error);
+  } else { motionEnabled = true; bindSensors(); updateGyroBtnState(); toast('✅ Motion Sync ON'); }
 }
-let lastAccel = 0;
+
+function toggleMotionSensors() {
+  if (!motionEnabled) { enableMotionSensors(); return; }
+  motionEnabled = false;
+  updateGyroBtnState();
+  toast('🚫 Motion Sync OFF');
+}
+
+function updateGyroBtnState() {
+  const btn = document.getElementById('gyroBtn');
+  if (!btn) return;
+  if (motionEnabled) {
+    btn.textContent = '🧭 Motion Sync ON';
+    btn.style.borderColor = 'var(--theme-color)';
+    btn.style.color = 'var(--theme-color)';
+  } else {
+    btn.textContent = '🧭 Enable Motion Sync';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
+}
+
 function bindSensors() {
-  window.addEventListener('devicemotion', (e) => { 
-    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
-    let acc = e.accelerationIncludingGravity; if(!acc) return; 
-    let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z); 
-    if(Math.abs(total - lastAccel) > 25) { setEmotion('dizzy'); resetInactivity(); } 
-    lastAccel = total; 
+  if (motionSensorsbound) return; // only bind once
+  motionSensorsbound = true;
+  window.addEventListener('devicemotion', (e) => {
+    // Skip if: disabled, sleeping, robot is actively moving/doing something, or in cooldown
+    if (!motionEnabled || isSleeping || hardwareActive || isBusy || motionCooldown) return;
+    let acc = e.accelerationIncludingGravity; if (!acc) return;
+    let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z);
+    // Raised threshold (was 25) — filters out robot motor vibrations reaching the phone
+    if (Math.abs(total - lastAccel) > 18) {
+      setEmotion('dizzy'); resetInactivity();
+      // Cooldown prevents motor-vibration bursts from spamming emotions
+      motionCooldown = true;
+      setTimeout(() => { motionCooldown = false; }, 1500);
+    }
+    lastAccel = total;
   });
-  window.addEventListener('deviceorientation', (e) => { 
-    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
-    if(Math.abs(e.beta) > 60 || Math.abs(e.gamma) > 60) { if(currentEmotion !== 'afraid') setEmotion('afraid'); resetInactivity(); } 
+  window.addEventListener('deviceorientation', (e) => {
+    if (!motionEnabled || isSleeping || hardwareActive || isBusy || motionCooldown) return;
+    if (Math.abs(e.beta) > 60 || Math.abs(e.gamma) > 60) {
+      if (currentEmotion !== 'afraid') { setEmotion('afraid'); resetInactivity(); }
+      motionCooldown = true;
+      setTimeout(() => { motionCooldown = false; }, 1500);
+    }
   });
 }
+
+// Suppress motion reactions for the entire duration of any hardware action
+const _origHardwareActiveSetter = Object.getOwnPropertyDescriptor(window, 'hardwareActive');
+// (hardwareActive is a plain var — we gate on it directly in the handlers above)
+
 
 // ════════════════════════════════════════════════════════
 // GEMINI AGENT
@@ -620,6 +667,7 @@ function setEmotion(name, force = false) {
   if (em.browSlant !== 0) { eyeEls.lBrow.setAttribute('y1', 35 - em.browSlant); eyeEls.lBrow.setAttribute('y2', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y1', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y2', 35 - em.browSlant); } else { eyeEls.lBrow.setAttribute('y1', 35); eyeEls.lBrow.setAttribute('y2', 35); eyeEls.rBrow.setAttribute('y1', 35); eyeEls.rBrow.setAttribute('y2', 35); }
   document.getElementById('tearGroup').style.opacity = em.tears ? '1' : '0';
   if (!ttsActive) applyMouthForEmotion(name);
+  updateMiniPetro(name); // keep mini petro face in sync
 }
 
 function applyMouthForEmotion(name) { const em = emotions[name] || emotions.neutral; setMouthPath(em.mouthType, em.mouthOpen); document.getElementById('mouthRim').setAttribute('stroke', em.color); }
@@ -774,7 +822,139 @@ function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
 // ════════════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// FACE TOUCH REACTIONS
+// ════════════════════════════════════════════════════════
+const TOUCH_REACTIONS = [
+  { zone: 'top',    emotion: 'surprised', msg: '👆 Hey, watch the head!' },
+  { zone: 'left',   emotion: 'shy',       msg: '😊 Hehe, tickles!' },
+  { zone: 'right',  emotion: 'shy',       msg: '😊 That tickles!' },
+  { zone: 'center', emotion: 'loving',    msg: '💕 Aww, thanks!' },
+  { zone: 'bottom', emotion: 'happy',     msg: '😄 Chin scratch!' },
+];
+
+const SWIPE_REACTIONS = [
+  { dir: 'left',  emotion: 'surprised', msg: '😲 Whoa, left swipe!' },
+  { dir: 'right', emotion: 'excited',   msg: '✨ Right on!' },
+  { dir: 'up',    emotion: 'curious',   msg: '🤔 Looking up?' },
+  { dir: 'down',  emotion: 'sad',       msg: '😔 Down? Aww…' },
+];
+
+function initFaceTouch() {
+  const face = document.getElementById('faceScreen');
+  if (!face) return;
+
+  // Tap reaction
+  face.addEventListener('pointerdown', (e) => {
+    if (isBusy) return;
+    const rect = face.getBoundingClientRect();
+    const rx = (e.clientX - rect.left) / rect.width;  // 0..1
+    const ry = (e.clientY - rect.top)  / rect.height; // 0..1
+
+    let zone = 'center';
+    if (ry < 0.3)       zone = 'top';
+    else if (ry > 0.7)  zone = 'bottom';
+    else if (rx < 0.33) zone = 'left';
+    else if (rx > 0.67) zone = 'right';
+
+    const r = TOUCH_REACTIONS.find(t => t.zone === zone) || TOUCH_REACTIONS[4];
+    setEmotion(r.emotion);
+    toast(r.msg);
+    // Ripple effect
+    spawnRipple(e.clientX, e.clientY, face);
+  }, { passive: true });
+
+  // Swipe reaction
+  let swipeStart = null;
+  face.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    swipeStart = { x: t.clientX, y: t.clientY, ts: Date.now() };
+  }, { passive: true });
+  face.addEventListener('touchend', (e) => {
+    if (!swipeStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipeStart.x;
+    const dy = t.clientY - swipeStart.y;
+    const dt = Date.now() - swipeStart.ts;
+    swipeStart = null;
+    if (dt > 400) return; // too slow — not a swipe
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < 30 && ady < 30) return; // too short — it's a tap, handled above
+    let dir;
+    if (adx > ady) dir = dx > 0 ? 'right' : 'left';
+    else            dir = dy > 0 ? 'down'  : 'up';
+    const r = SWIPE_REACTIONS.find(s => s.dir === dir);
+    if (r) { setEmotion(r.emotion); toast(r.msg); }
+  }, { passive: true });
+}
+
+function spawnRipple(cx, cy, parent) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;left:${cx}px;top:${cy}px;width:0;height:0;border-radius:50%;
+    background:radial-gradient(circle,var(--theme-color) 0%,transparent 70%);
+    transform:translate(-50%,-50%);pointer-events:none;z-index:9999;
+    animation:ripple-grow 0.55s ease-out forwards;`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 600);
+}
+
+// ════════════════════════════════════════════════════════
+// MINI PETRO (video overlay face — synced to main face)
+// ════════════════════════════════════════════════════════
+const MINI_MOOD_LABELS = {
+  neutral:'😐 Chilling', happy:'😄 Happy!', excited:'🤩 Hyped!', sad:'😢 Sad…',
+  angry:'😠 Grr!', curious:'🤔 Curious', focused:'🎯 Focused', loving:'💕 Loving it!',
+  shy:'😊 Shy~', surprised:'😲 Whoa!', dizzy:'😵 Dizzy', afraid:'😨 Scared!', sleeping:'😴 Zzz…'
+};
+
+function _applyMiniPetroFace(irisL, lidL, irisR, lidR, mouth, em, emotionName) {
+  if (!irisL) return;
+  const eyeColor = (emotionName === 'neutral') ? 'var(--theme-color)' : em.color;
+  const r = Math.max(6, Math.round(em.irisR * 0.22));
+  irisL.setAttribute('r', r); irisL.style.fill = eyeColor;
+  irisR.setAttribute('r', r); irisR.style.fill = eyeColor;
+  // Lid: slide down to cover eye when sleeping/shy/sad
+  const lidY = em.lidTopY > 0 ? Math.min(30, 10 + em.lidTopY * 0.4) : 10;
+  lidL.setAttribute('y', lidY); lidR.setAttribute('y', lidY);
+  // Mouth
+  let d;
+  switch(em.mouthType) {
+    case 'smile':  d = 'M 30 62 Q 50 72 70 62'; break;
+    case 'laugh':  d = 'M 27 59 Q 50 76 73 59'; break;
+    case 'frown':  d = 'M 30 68 Q 50 58 70 68'; break;
+    case 'flat':   d = 'M 32 65 L 68 65';        break;
+    case 'sleep':  d = 'M 38 65 Q 50 65 62 65';  break;
+    case 'wiggle': d = 'M 28 65 Q 38 57 50 65 T 72 65'; break;
+    default:       d = 'M 35 63 Q 50 70 65 63';  break;
+  }
+  mouth.setAttribute('d', d);
+  mouth.setAttribute('stroke', eyeColor);
+}
+
+function updateMiniPetro(emotionName) {
+  const em = emotions[emotionName] || emotions.neutral;
+  // dpad-area mini petro (shown when video is playing, left sidebar)
+  _applyMiniPetroFace(
+    document.getElementById('mini-ml-iris'), document.getElementById('mini-ml-lid'),
+    document.getElementById('mini-mr-iris'), document.getElementById('mini-mr-lid'),
+    document.getElementById('mini-mouth'), em, emotionName
+  );
+  const statusEl = document.getElementById('miniPetroStatus');
+  if (statusEl) statusEl.textContent = MINI_MOOD_LABELS[emotionName] || '😐 Chilling';
+
+  // yt side panel mini petro
+  _applyMiniPetroFace(
+    document.getElementById('yt-ml-iris'), document.getElementById('yt-ml-lid'),
+    document.getElementById('yt-mr-iris'), document.getElementById('yt-mr-lid'),
+    document.getElementById('yt-mouth'), em, emotionName
+  );
+  const moodEl = document.getElementById('ytSideMood');
+  if (moodEl) moodEl.textContent = MINI_MOOD_LABELS[emotionName] || '😐 Chilling';
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   initEyes(); resetInactivity(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral');
   if (synth) { synth.getVoices(); synth.addEventListener('voiceschanged', () => synth.getVoices()); }
+  initFaceTouch();
+  updateGyroBtnState();
 });
