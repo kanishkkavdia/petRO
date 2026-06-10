@@ -4,7 +4,7 @@
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
 const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
-const SLEEP_MS    = SLEEP_IDLE_MS; 
+const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 const YT_API_KEY = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
@@ -12,13 +12,6 @@ const YT_API_KEY = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
 const BLE_SERVICE  = '00001234-0000-1000-8000-00805f9b34fb';
 const BLE_CMD_CHAR = '00005678-0000-1000-8000-00805f9b34fb';
 const BLE_NAME     = 'petRO';
-
-const BLE_RECONNECT_MAX    = 5;      // max auto-reconnect attempts
-const BLE_RECONNECT_DELAY  = 2000;   // ms between retries (doubles each time)
-const IDLE_EXPR_MS         = 12000;  // ms of inactivity before idle expression
-const IDLE_MOVE_MIN        = 10000;  // idle move min interval
-const IDLE_MOVE_MAX        = 20000;  // idle move max interval
-const SLEEP_IDLE_MS        = 2 * 60 * 1000; // 2 min idle → sleep (was 5 min)
 
 const DANCE_STEPS = [
   ['D', 1500], ['1', 600], ['2', 600], ['3', 400], ['4', 400], 
@@ -38,11 +31,10 @@ const THEMES = {
 // STATE
 // ════════════════════════════════════════════════════════
 let bleDevice = null, bleCmdChar = null, bleConnected = false, isBusy = false;
-let bleReconnectAttempts = 0, bleReconnecting = false, bleReconnectTimer = null;
 let currentEmotion = 'neutral', emotionResetTimer = null; 
 let isSleeping = false, micState = 'off', alwaysOnMic = false;
 let bgRecog = null, cmdRecog = null;
-let inactTimer = null, idleMoveTimer = null, idleExprTimer = null, zzzAnim = null, blinkTimer = null;
+let inactTimer = null, idleMoveTimer = null, zzzAnim = null, blinkTimer = null;
 let videoStream = null, currentUploadedImage = null;
 let ttsActive = false, mouthTalkAnim = null, toastTimer = null;
 let chatHistory = [], motionEnabled = false;
@@ -133,13 +125,6 @@ function clearUsage() {
 // BLUETOOTH
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
-  // If reconnecting, cancel and allow fresh scan
-  if (bleReconnecting || bleReconnectAttempts > 0) {
-    bleReconnecting = false;
-    bleReconnectAttempts = BLE_RECONNECT_MAX; // stop further auto-retries
-    clearTimeout(bleReconnectTimer);
-    bleDevice = null; bleCmdChar = null; setBLE(false);
-  }
   if (bleConnected) { disconnectBLE(); return; }
   if (!navigator.bluetooth) { toast('❌ Web Bluetooth not supported.'); return; }
   setBLE(null); toast('🔍 Scanning…');
@@ -147,82 +132,22 @@ async function toggleBLE() {
   catch(e1) { if (e1.name === 'AbortError') { setBLE(false); return; } try { bleDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE] }); } catch(e2) { setBLE(false); toast('❌ No BLE devices found.'); return; } }
   bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
   toast(`🔗 Connecting to ${bleDevice.name}…`);
-  try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); bleReconnectAttempts = 0; toast(`✅ Connected!`); updateBleInfoBox(); resetInactivity(); } 
+  try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); toast(`✅ Connected!`); updateBleInfoBox(); resetInactivity(); } 
   catch(e) { setBLE(false); bleDevice = null; toast('❌ Connection failed.'); }
 }
-function disconnectBLE() { 
-  bleReconnectAttempts = BLE_RECONNECT_MAX; // prevent auto-reconnect on manual disconnect
-  clearTimeout(bleReconnectTimer);
-  try { bleDevice?.gatt?.disconnect(); } catch {} 
-  bleDevice = null; bleCmdChar = null; setBLE(false); 
-  toast('Disconnected'); updateBleInfoBox(); 
-}
-
-function onBleDisconnect() { 
-  if (!bleConnected) return; 
-  setBLE(false); bleCmdChar = null; 
-  toast('⚠️ petRO disconnected.'); 
-  updateBleInfoBox(); 
-  scheduleReconnect(); 
-}
-
-function scheduleReconnect() {
-  if (bleReconnecting || bleReconnectAttempts >= BLE_RECONNECT_MAX || !bleDevice) return;
-  bleReconnecting = true;
-  const delay = BLE_RECONNECT_DELAY * Math.pow(1.5, bleReconnectAttempts);
-  bleReconnectAttempts++;
-  toast(`🔄 Reconnecting (${bleReconnectAttempts}/${BLE_RECONNECT_MAX})… tap BLE to cancel`);
-  bleReconnectTimer = setTimeout(async () => {
-    bleReconnecting = false;
-    if (bleConnected || !bleDevice) return;
-    try {
-      setBLE(null);
-      const server = await bleDevice.gatt.connect();
-      const service = await server.getPrimaryService(BLE_SERVICE);
-      bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
-      setBLE(true); bleReconnectAttempts = 0;
-      toast('✅ Reconnected!'); updateBleInfoBox();
-    } catch(e) {
-      setBLE(false);
-      if (bleReconnectAttempts < BLE_RECONNECT_MAX) {
-        scheduleReconnect();
-      } else {
-        toast('❌ Could not reconnect. Tap BLE to retry.');
-        bleDevice = null; bleCmdChar = null;
-      }
-    }
-  }, delay);
-}
-
+function disconnectBLE() { try { bleDevice?.gatt?.disconnect(); } catch {} bleDevice = null; bleCmdChar = null; setBLE(false); toast('Disconnected'); updateBleInfoBox(); }
+function onBleDisconnect() { if (!bleConnected) return; setBLE(false); toast('⚠️ petRO disconnected.'); bleCmdChar = null; updateBleInfoBox(); }
 function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
 function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; }
 
 async function bleSend(cmd) {
-  if (!bleDevice) return;
+  if (!bleCmdChar) return;
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
   hwTimeout = setTimeout(() => hardwareActive = false, 3000);
 
-  // Try to reconnect if GATT is not connected
-  if (!bleDevice?.gatt?.connected) { 
-    try { 
-      setBLE(null);
-      const server = await bleDevice.gatt.connect(); 
-      const service = await server.getPrimaryService(BLE_SERVICE); 
-      bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); 
-      setBLE(true); bleReconnectAttempts = 0;
-    } catch(e) { 
-      setBLE(false); 
-      scheduleReconnect();
-      return; 
-    } 
-  }
-  try { 
-    await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); 
-  } catch(e) { 
-    setBLE(false); bleCmdChar = null; 
-    scheduleReconnect();
-  }
+  if (!bleDevice?.gatt?.connected) { try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); } catch(e) { setBLE(false); return; } }
+  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -587,50 +512,35 @@ function setMouthPath(type, open = 0) { const mp = document.getElementById('mout
 // SLEEP / WAKE / IDLE / MIC
 // ════════════════════════════════════════════════════════
 function goToSleep() { if(isSleeping)return; isSleeping=true; setEmotion('sleeping',true); stopTTS(); startZZZ(); }
-function wakeUp() { if(!isSleeping)return; isSleeping=false; stopZZZ(); setEmotion('neutral',true); resetInactivity(); toast('👋 petRO is awake!'); }
+function wakeUp() { if(!isSleeping)return; isSleeping=false; stopZZZ(); setEmotion('neutral',true); resetInactivity(); }
 function startZZZ() { const g = document.getElementById('sleepZZZ'), z1 = document.getElementById('z1'), z2 = document.getElementById('z2'), z3 = document.getElementById('z3'); g.style.opacity = '1'; let t = 0; (function f() { t+=0.03; const b=Math.sin(t)*0.3+0.7; z1.setAttribute('opacity',b); z2.setAttribute('opacity',b*0.7); z3.setAttribute('opacity',b*0.45); z1.setAttribute('y',40-Math.sin(t*0.7)*7); z2.setAttribute('y',24-Math.sin(t*0.7+.5)*7); z3.setAttribute('y',6-Math.sin(t*0.7+1)*7); zzzAnim=requestAnimationFrame(f); })(); }
 function stopZZZ() { if(zzzAnim)cancelAnimationFrame(zzzAnim); document.getElementById('sleepZZZ').style.opacity = '0'; }
 
 function resetInactivity() { 
   if(isSleeping) wakeUp(); 
-  clearTimeout(inactTimer); clearTimeout(idleMoveTimer); clearTimeout(idleExprTimer);
+  clearTimeout(inactTimer); clearTimeout(idleMoveTimer);
   inactTimer = setTimeout(goToSleep, SLEEP_MS);
-  scheduleIdleMove();
-  scheduleIdleExpression();
-}
-
-// ── IDLE EXPRESSIONS ──
-const IDLE_EXPRESSIONS = ['curious', 'happy', 'shy', 'loving', 'focused', 'neutral', 'surprised'];
-function scheduleIdleExpression() {
-  clearTimeout(idleExprTimer);
-  idleExprTimer = setTimeout(() => {
-    if (!isSleeping && !isBusy && !ttsActive && !isVideoPlaying) {
-      const expr = IDLE_EXPRESSIONS[Math.floor(Math.random() * IDLE_EXPRESSIONS.length)];
-      setEmotion(expr);
-    }
-    scheduleIdleExpression();
-  }, IDLE_EXPR_MS + Math.random() * IDLE_EXPR_MS);
+  scheduleIdleMove(); 
 }
 
 function scheduleIdleMove() {
   idleMoveTimer = setTimeout(() => {
     if (!isSleeping && !isBusy && bleConnected && !isVideoPlaying) {
-       const roll = Math.random();
-       if (roll > 0.85) {
+       // Occasional physical wander vs smaller moves
+       if (Math.random() > 0.85) {
            doWander(); 
-       } else if (roll > 0.55) {
-           // Medium movement
-           const midMoves = ['F', 'B', 'L', 'R', 'N'];
-           bleSend(midMoves[Math.floor(Math.random() * midMoves.length)]);
-           setTimeout(() => bleSend('S'), 800);
        } else {
-           // Small gesture
            const idleMoves = ['7', '8', 'E', 'C', 'A', 'V', 'U']; 
            bleSend(idleMoves[Math.floor(Math.random() * idleMoves.length)]);
        }
+       
+       if (Math.random() > 0.5) {
+           const idleEmotions = ['happy', 'focused', 'curious', 'neutral', 'shy', 'loving'];
+           setEmotion(idleEmotions[Math.floor(Math.random() * idleEmotions.length)]);
+       }
     }
     scheduleIdleMove();
-  }, IDLE_MOVE_MIN + Math.random() * (IDLE_MOVE_MAX - IDLE_MOVE_MIN)); 
+  }, 10000 + Math.random() * 15000); 
 }
 
 ['click','keydown','touchstart'].forEach(e => document.addEventListener(e, resetInactivity, {passive:true}));
@@ -748,6 +658,6 @@ function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
 // INIT
 // ════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => {
-  initEyes(); resetInactivity(); scheduleIdleExpression(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral');
+  initEyes(); resetInactivity(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral');
   if (synth) { synth.getVoices(); synth.addEventListener('voiceschanged', () => synth.getVoices()); }
 });
