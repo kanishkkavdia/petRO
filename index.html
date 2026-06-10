@@ -76,7 +76,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .face-wrap { width: min(380px, 92vw); flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; }
 .face-wrap svg { width: 100%; height: auto; display: block; overflow: visible; transition: all 0.3s; }
 
-/* ── Listening Status Text ── */
+/* ── Listening Status Text (Replaces Overlay) ── */
 #listeningStatus {
   position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
   font-size: 0.8rem; font-weight: 700; color: var(--theme-color);
@@ -121,10 +121,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .act:active { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.96); }
 
 /* Mini petRO for YouTube Mode */
-#miniPetroArea { display:none; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:15px; text-align:center; transition: opacity 0.5s; }
-.mini-petro-svg { width: 120px; height: 120px; border-radius: 50%; background: var(--card); border: 2px solid var(--theme-color); padding: 10px; }
-.mini-title { font-size: 1.1rem; font-weight: 700; color: var(--theme-color); }
-.mini-sub { font-size: 0.8rem; color: var(--muted); padding: 0 10px; }
+#miniPetroArea { display:none; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:10px; text-align:center; opacity:0; transition: opacity 0.5s; padding: 8px; }
+.mini-petro-svg { width: 110px; height: 110px; filter: drop-shadow(0 0 8px var(--theme-glow)); flex-shrink: 0; }
+.mini-title { font-size: 0.78rem; font-weight: 700; color: var(--theme-color); }
+.mini-sub { font-size: 0.72rem; color: var(--muted); padding: 0 10px; }
+
+/* Touch ripple */
+@keyframes ripple-grow {
+  0%   { width:0;     height:0;    opacity:0.7; }
+  100% { width:160px; height:160px;opacity:0;   }
+}
 
 /* ── CHAT ── */
 #chatSection { display:flex; flex-direction:column; min-height:0; position: relative; }
@@ -212,9 +218,18 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   background: var(--surface); z-index: 150; display: none; flex-direction: column;
 }
-#ytHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: var(--card); border-bottom: 1px solid var(--border); }
-#ytPlayerDiv { flex: 1; border: none; width: 100%; }
-.close-yt-btn { background: var(--red); color: white; border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+#ytHeader { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#ytBody { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+#ytSidePanel {
+  width: 110px; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 10px 6px;
+  background: var(--bg); border-right: 1px solid var(--border);
+}
+#ytSidePanel .mini-petro-svg { width: 90px; height: 90px; }
+#ytSideMood { font-size: 0.65rem; font-weight: 700; color: var(--theme-color); text-align: center; letter-spacing: 0.5px; }
+#ytPlayerDiv { flex: 1; border: none; width: 100%; min-width: 0; }
+.close-yt-btn { background: var(--red); color: white; border: none; padding: 4px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.78rem; }
 </style>
 <script src="https://www.youtube.com/iframe_api"></script>
 </head>
@@ -349,19 +364,34 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         <button class="act" onclick="clearChat()">🗑 Clear</button>
       </div>
       <div id="memoryPill">Memory: 0 / 50 msgs</div>
+      <button class="act" onclick="toggleMotionSensors()" id="gyroBtn" style="margin-top:10px; width:100%;">🧭 Enable Motion Sync</button>
     </div>
 
     <div id="miniPetroArea">
       <div class="section-label">🎬 Media Mode</div>
-      <svg class="mini-petro-svg" viewBox="0 0 100 100">
-        <circle id="mini-ml-iris" cx="30" cy="45" r="10" fill="var(--theme-color)"/>
-        <rect id="mini-ml-lid" x="15" y="10" width="30" height="2" fill="var(--card)" stroke="none"/>
-        <circle id="mini-mr-iris" cx="70" cy="45" r="10" fill="var(--theme-color)"/>
-        <rect id="mini-mr-lid" x="55" y="10" width="30" height="2" fill="var(--card)" stroke="none"/>
-        <path id="mini-mouth" d="M 35 70 Q 50 85 65 70" fill="none" stroke="var(--theme-color)" stroke-width="4" stroke-linecap="round"/>
+      <svg class="mini-petro-svg" id="miniPetroSVG" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Head -->
+        <rect x="8" y="12" width="84" height="76" rx="22" ry="22" fill="var(--card)" stroke="var(--theme-color)" stroke-width="2.5"/>
+        <!-- Left eye -->
+        <circle id="mini-ml-iris" cx="32" cy="42" r="11" fill="var(--theme-color)" opacity="0.9"/>
+        <circle cx="32" cy="42" r="5" fill="#000" opacity="0.7"/>
+        <circle cx="28" cy="38" r="2.5" fill="#fff" opacity="0.6"/>
+        <rect id="mini-ml-lid" x="21" y="10" width="22" height="20" rx="4" fill="var(--card)"/>
+        <!-- Right eye -->
+        <circle id="mini-mr-iris" cx="68" cy="42" r="11" fill="var(--theme-color)" opacity="0.9"/>
+        <circle cx="68" cy="42" r="5" fill="#000" opacity="0.7"/>
+        <circle cx="64" cy="38" r="2.5" fill="#fff" opacity="0.6"/>
+        <rect id="mini-mr-lid" x="57" y="10" width="22" height="20" rx="4" fill="var(--card)"/>
+        <!-- Mouth -->
+        <path id="mini-mouth" d="M 30 62 Q 50 72 70 62" fill="none" stroke="var(--theme-color)" stroke-width="3.5" stroke-linecap="round"/>
+        <!-- Antenna -->
+        <line x1="50" y1="12" x2="50" y2="4" stroke="var(--theme-color)" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="50" cy="3" r="3" fill="var(--theme-color)" opacity="0.8"/>
+        <!-- Ear nubs -->
+        <rect x="2" y="35" width="8" height="16" rx="4" fill="var(--theme-color)" opacity="0.5"/>
+        <rect x="90" y="35" width="8" height="16" rx="4" fill="var(--theme-color)" opacity="0.5"/>
       </svg>
-      <div class="mini-title" id="miniPetroStatus">petRO is chilling</div>
-      <div class="mini-sub">D-Pad disabled while video plays.</div>
+      <div class="mini-title" id="miniPetroStatus">petRO is watching 👀</div>
     </div>
 
   </div>
@@ -370,10 +400,31 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     
     <div id="ytContainer">
       <div id="ytHeader">
-        <span style="font-weight: bold; font-size: 0.8rem;">petRO Media Player</span>
-        <button class="close-yt-btn" onclick="closeYouTube()">Close</button>
+        <span style="font-weight: bold; font-size: 0.78rem;">🎬 petRO Media Player</span>
+        <button class="close-yt-btn" onclick="closeYouTube()">✕ Close</button>
       </div>
-      <div id="ytPlayerDiv"></div>
+      <div id="ytBody">
+        <div id="ytSidePanel">
+          <svg class="mini-petro-svg" id="ytMiniPetroSVG" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <rect x="8" y="12" width="84" height="76" rx="22" ry="22" fill="var(--card)" stroke="var(--theme-color)" stroke-width="2.5"/>
+            <circle id="yt-ml-iris" cx="32" cy="42" r="11" fill="var(--theme-color)" opacity="0.9"/>
+            <circle cx="32" cy="42" r="5" fill="#000" opacity="0.7"/>
+            <circle cx="28" cy="38" r="2.5" fill="#fff" opacity="0.6"/>
+            <rect id="yt-ml-lid" x="21" y="10" width="22" height="20" rx="4" fill="var(--card)"/>
+            <circle id="yt-mr-iris" cx="68" cy="42" r="11" fill="var(--theme-color)" opacity="0.9"/>
+            <circle cx="68" cy="42" r="5" fill="#000" opacity="0.7"/>
+            <circle cx="64" cy="38" r="2.5" fill="#fff" opacity="0.6"/>
+            <rect id="yt-mr-lid" x="57" y="10" width="22" height="20" rx="4" fill="var(--card)"/>
+            <path id="yt-mouth" d="M 30 62 Q 50 72 70 62" fill="none" stroke="var(--theme-color)" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="50" y1="12" x2="50" y2="4" stroke="var(--theme-color)" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="50" cy="3" r="3" fill="var(--theme-color)" opacity="0.8"/>
+            <rect x="2" y="35" width="8" height="16" rx="4" fill="var(--theme-color)" opacity="0.5"/>
+            <rect x="90" y="35" width="8" height="16" rx="4" fill="var(--theme-color)" opacity="0.5"/>
+          </svg>
+          <div id="ytSideMood">😊 Enjoying!</div>
+        </div>
+        <div id="ytPlayerDiv"></div>
+      </div>
     </div>
 
     <div class="section-label" style="padding-top:14px;">💬 Chat with petRO</div>
@@ -476,7 +527,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     <hr class="settings-divider">
 
     <div class="settings-row">
-      <div class="settings-label">🗑️ Bluetooth (BLE)</div>
+      <div class="settings-label">📡 Bluetooth (BLE)</div>
       <div class="ble-info" id="bleInfoBox">Status: Not connected</div>
       <div style="display:flex;gap:8px;">
         <button class="save-btn" onclick="closeSettings();toggleBLE()">🔗 Connect BLE</button>
