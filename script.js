@@ -112,7 +112,6 @@ function trackUsage(inTokens, outTokens) {
 function updateUsageUI() {
     const el = document.getElementById('usageBox'); if (!el) return;
     let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
-    // Est cost based on standard Gemini Flash pricing (~$0.075/1M in, ~$0.30/1M out)
     const cost = ((usage.in / 1000000) * 0.075) + ((usage.out / 1000000) * 0.30);
     el.innerHTML = `Requests: <b>${usage.req}</b><br>Tokens: <b>${usage.in.toLocaleString()}</b> In / <b>${usage.out.toLocaleString()}</b> Out<br>Est. Cost: <b>$${cost.toFixed(5)}</b>`;
 }
@@ -125,26 +124,21 @@ function clearUsage() {
 // BLUETOOTH
 // ════════════════════════════════════════════════════════
 
-// --- Reconnect state (declared before use) ---
 let bleIntentionalDisconnect = false;
 let bleReconnectTimer = null;
 let bleReconnectAttempts = 0;
 const BLE_MAX_RECONNECT = 8;
 
-// --- Mutex queue: only ONE write in-flight at a time ---
-// Each call waits for the previous to fully resolve before starting.
 let _bleQueueTail = Promise.resolve();
 function bleSend(cmd) {
-  // Chain onto the tail; capture the new tail so next call waits on THIS one
   const next = _bleQueueTail.then(() => _bleWrite(cmd));
-  _bleQueueTail = next.catch(() => {}); // prevent unhandled rejection on the shared tail
-  return next; // caller gets a promise that resolves/rejects for THIS write only
+  _bleQueueTail = next.catch(() => {});
+  return next;
 }
 
 async function _bleWrite(cmd) {
   if (!bleDevice || bleIntentionalDisconnect) return;
 
-  // If GATT layer dropped, reconnect before writing
   if (!bleDevice.gatt.connected) {
     try {
       const server  = await bleDevice.gatt.connect();
@@ -153,7 +147,7 @@ async function _bleWrite(cmd) {
       _setBLEConnected(true);
     } catch(e) {
       _setBLEConnected(false);
-      throw e; // propagate so caller knows the write didn't happen
+      throw e;
     }
   }
 
@@ -161,7 +155,6 @@ async function _bleWrite(cmd) {
   try {
     await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd));
   } catch(e) {
-    // write failed — GATT probably dropped right now; let onBleDisconnect handle it
     _setBLEConnected(false);
     bleCmdChar = null;
     throw e;
@@ -195,11 +188,10 @@ function disconnectBLE() {
 }
 
 function onBleDisconnect() {
-  if (bleIntentionalDisconnect) return; // user pressed disconnect — don't reconnect
+  if (bleIntentionalDisconnect) return;
   _setBLEConnected(false);
   bleCmdChar = null;
   updateBleInfoBox();
-  // Start back-off reconnect
   bleReconnectAttempts = 0;
   _scheduleReconnect();
 }
@@ -211,7 +203,7 @@ function _scheduleReconnect() {
     return;
   }
   bleReconnectAttempts++;
-  const delay = Math.min(500 * bleReconnectAttempts, 6000); // 0.5s, 1s, 1.5s … max 6s
+  const delay = Math.min(500 * bleReconnectAttempts, 6000);
   toast(`⚠️ Disconnected. Reconnecting (${bleReconnectAttempts}/${BLE_MAX_RECONNECT})…`);
   clearTimeout(bleReconnectTimer);
   bleReconnectTimer = setTimeout(_attemptReconnect, delay);
@@ -228,11 +220,10 @@ async function _attemptReconnect() {
     setBLE(true); toast('✅ Reconnected!'); updateBleInfoBox();
   } catch(e) {
     _setBLEConnected(false);
-    _scheduleReconnect(); // try again with increased delay
+    _scheduleReconnect();
   }
 }
 
-// Sets the UI+flag WITHOUT triggering side-effects that cause more bleSend calls
 function _setBLEConnected(val) {
   bleConnected = val;
   const b = document.getElementById('bleBtn');
@@ -283,18 +274,104 @@ function enableMotionSensors() {
     DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
   } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; }
 }
-let lastAccel = 0;
+
+// ── MOTION: only react to sudden UPWARD lift (negative gravity-Z spike) ──
+// We track a rolling baseline of Z-axis gravity so normal rover movement
+// (forward/backward/turn) doesn't trigger reactions — only a genuine upward
+// pick-up does (Z goes strongly negative = phone lifted up fast).
+let _zBaseline = null;          // rolling average of Z-component
+let _zLastRaw  = null;          // previous raw Z sample
+let _motionCooldown = false;    // prevent rapid-fire triggers
+
+function _updateZBaseline(z) {
+  if (_zBaseline === null) { _zBaseline = z; return; }
+  // Slow EMA so baseline tracks resting position but not fast transients
+  _zBaseline = _zBaseline * 0.97 + z * 0.03;
+}
+
 function bindSensors() {
-  window.addEventListener('devicemotion', (e) => { 
-    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
-    let acc = e.accelerationIncludingGravity; if(!acc) return; 
-    let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z); 
-    if(Math.abs(total - lastAccel) > 25) { setEmotion('dizzy'); resetInactivity(); } 
-    lastAccel = total; 
+  window.addEventListener('devicemotion', (e) => {
+    if (isSleeping || !motionEnabled || isMoving || hardwareActive) return;
+
+    const acc = e.accelerationIncludingGravity;
+    if (!acc) return;
+
+    const z = acc.z;  // positive = face-up on table, negative = lifted up
+    if (_zLastRaw === null) { _zLastRaw = z; _zBaseline = z; return; }
+
+    // Update baseline with the previous sample (before this spike)
+    _updateZBaseline(_zLastRaw);
+    _zLastRaw = z;
+
+    if (_motionCooldown) return;
+
+    // Deviation from baseline: strongly negative Z means sudden upward lift
+    const deviation = z - _zBaseline;
+
+    // Only react to upward movement: deviation < -14 m/s² (sharp upward jerk)
+    // Ignore horizontal jolts (X/Y bumps from rover driving) by requiring
+    // the upward component to dominate: |deviation_z| must be > 1.5× combined X/Y
+    const lateral = Math.sqrt(acc.x * acc.x + acc.y * acc.y);
+    const isUpwardLift = deviation < -14 && Math.abs(deviation) > lateral * 1.5;
+
+    if (isUpwardLift) {
+      setEmotion('dizzy');
+      resetInactivity();
+      _motionCooldown = true;
+      setTimeout(() => { _motionCooldown = false; }, 2500);
+    }
   });
-  window.addEventListener('deviceorientation', (e) => { 
-    if(isSleeping || !motionEnabled || isMoving || hardwareActive) return;
-    if(Math.abs(e.beta) > 60 || Math.abs(e.gamma) > 60) { if(currentEmotion !== 'afraid') setEmotion('afraid'); resetInactivity(); } 
+
+  // Tilt/orientation: only react when phone is nearly vertical (held up)
+  // AND rover is not actively driving (hardwareActive / isMoving guards above handle BLE,
+  // but we also skip if orientation looks like it's just sitting flat on a table)
+  window.addEventListener('deviceorientation', (e) => {
+    if (isSleeping || !motionEnabled || isMoving || hardwareActive) return;
+    // beta > 70° means the phone is very steeply tilted — unlikely to be rover motion
+    if (Math.abs(e.beta) > 70 || Math.abs(e.gamma) > 70) {
+      if (currentEmotion !== 'afraid') { setEmotion('afraid'); resetInactivity(); }
+    }
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// TOUCH REACTIONS ON ROBOT FACE
+// ════════════════════════════════════════════════════════
+// Call this once after DOM is ready; attaches pointer events to the robot SVG.
+function initTouchReactions() {
+  const svg = document.querySelector('#robotFace, svg.robot-face, svg');
+  if (!svg) return;
+
+  // Map touch zones (rough bounding boxes in SVG coordinate space) to emotions
+  // SVG viewBox assumed ~300×230 based on the eye coordinates in the code.
+  // Zones: top-of-head, left-eye, right-eye, nose/center, mouth, chin
+  const TOUCH_REACTIONS = [
+    { name: 'head-pat',    yMin: 0,   yMax: 55,  xMin: 50,  xMax: 250, emotion: 'loving',    reply: 'Pat pat! 💙' },
+    { name: 'left-eye',   yMin: 60,  yMax: 115, xMin: 30,  xMax: 100, emotion: 'shy',       reply: 'Hey! 👀'    },
+    { name: 'right-eye',  yMin: 60,  yMax: 115, xMin: 200, xMax: 270, emotion: 'shy',       reply: 'Hey! 👀'    },
+    { name: 'nose',       yMin: 115, yMax: 150, xMin: 100, xMax: 200, emotion: 'surprised', reply: 'Boop! 👃'   },
+    { name: 'mouth',      yMin: 150, yMax: 185, xMin: 90,  xMax: 210, emotion: 'happy',     reply: 'Hehe! 😄'   },
+    { name: 'chin',       yMin: 185, yMax: 230, xMin: 60,  xMax: 240, emotion: 'curious',   reply: 'Hmm? 🤔'    },
+  ];
+
+  svg.addEventListener('pointerdown', (e) => {
+    if (isSleeping) { wakeUp(); return; }
+
+    const rect = svg.getBoundingClientRect();
+    // Convert pointer to SVG-local coordinates
+    const scaleX = (svg.viewBox?.baseVal?.width  || 300) / rect.width;
+    const scaleY = (svg.viewBox?.baseVal?.height || 230) / rect.height;
+    const lx = (e.clientX - rect.left)  * scaleX;
+    const ly = (e.clientY - rect.top)   * scaleY;
+
+    for (const zone of TOUCH_REACTIONS) {
+      if (lx >= zone.xMin && lx <= zone.xMax && ly >= zone.yMin && ly <= zone.yMax) {
+        setEmotion(zone.emotion);
+        resetInactivity();
+        toast(zone.reply);
+        break;
+      }
+    }
   });
 }
 
@@ -515,9 +592,10 @@ async function doChat(userText, imageDataUrl = null) {
   isBusy = true; document.getElementById('sendBtn').disabled = true; const typEl = showTyping();
   try {
     const { reply, emotion, toolCalls } = await callGemini(userText, imageDataUrl); removeTyping(typEl);
-    appendMsg('bot', reply, toolCalls.map(t => t.name)); setEmotion(emotion); speak(reply);
+    // ── Action chips removed: no longer passing toolCalls names to appendMsg ──
+    appendMsg('bot', reply); setEmotion(emotion); speak(reply);
     addToHistory('user', userText, imageDataUrl); addToHistory('model', reply); await executeTools(toolCalls);
-  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
+  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
 }
 function addToHistory(role, text, imageBase64 = null) { chatHistory.push({ role, text, imageBase64 }); if (chatHistory.length > MAX_HISTORY) chatHistory.splice(0, chatHistory.length - MAX_HISTORY); try { sessionStorage.setItem('petro_history', JSON.stringify(chatHistory.map(m => ({...m, imageBase64: null})))); } catch {} updateMemoryPill(); }
 function loadHistory() { try { const saved = sessionStorage.getItem('petro_history'); if (saved) chatHistory = JSON.parse(saved); } catch {} }
@@ -549,7 +627,6 @@ function speak(text) {
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
   utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
   
-  // Detect Hindi logic
   const isHindi = /[\u0900-\u097F]/.test(clean);
   const voices = synth.getVoices();
   let pref;
@@ -643,7 +720,6 @@ function resetInactivity() {
 function scheduleIdleMove() {
   idleMoveTimer = setTimeout(() => {
     if (!isSleeping && !isBusy && bleDevice && !isVideoPlaying) {
-       // Occasional physical wander vs smaller moves
        if (Math.random() > 0.85) {
            doWander(); 
        } else {
@@ -662,7 +738,15 @@ function scheduleIdleMove() {
 
 ['click','keydown','touchstart'].forEach(e => document.addEventListener(e, resetInactivity, {passive:true}));
 
-function appendMsg(role, text, actions = []) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : 'petRO 🤖'; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; el.append(lbl, bub); if (actions?.length) { const chip = document.createElement('div'); chip.className = 'actions-chip'; chip.textContent = '⚡ ' + actions.join(' · '); el.append(chip); } c.append(el); c.scrollTop = c.scrollHeight; }
+// ── appendMsg: action chips removed ──
+function appendMsg(role, text) { 
+  const c = document.getElementById('messages'), el = document.createElement('div'); 
+  el.className = `msg ${role}`; 
+  const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : 'petRO 🤖'; 
+  const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; 
+  el.append(lbl, bub); 
+  c.append(el); c.scrollTop = c.scrollHeight; 
+}
 function showTyping() { const c=document.getElementById('messages'),el=document.createElement('div'); el.className='msg bot'; el.innerHTML=`<div class="msg-label">petRO 🤖</div><div class="typing-wrap"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`; c.append(el); c.scrollTop=c.scrollHeight; return el; }
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
@@ -776,5 +860,6 @@ function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
 // ════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => {
   initEyes(); resetInactivity(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral');
+  initTouchReactions(); // ← touch reactions on robot face
   if (synth) { synth.getVoices(); synth.addEventListener('voiceschanged', () => synth.getVoices()); }
 });
