@@ -3,17 +3,15 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-let botName = 'petRO'; 
-let WAKE_WORDS = ['ok petro','okay petro','hey petro']; // Dynamically updated
-
-const SLEEP_MS     = 5 * 60 * 1000; 
+const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
+const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
-const GEMINI_URL   = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 const YT_API_KEY = 'AIzaSyC6Z2NDf7sy6oz35p5ZZfB8yYNVz5sJZZU';
 
 const BLE_SERVICE  = '00001234-0000-1000-8000-00805f9b34fb';
 const BLE_CMD_CHAR = '00005678-0000-1000-8000-00805f9b34fb';
-const BLE_NAME     = 'petRO'; // Hardware name stays the same
+const BLE_NAME     = 'petRO';
 
 const DANCE_STEPS = [
   ['D', 1500], ['1', 600], ['2', 600], ['3', 400], ['4', 400], 
@@ -21,7 +19,7 @@ const DANCE_STEPS = [
 ];
 
 const THEMES = {
-  default: { color: '#3b9eff', bg: '#090d18', surface: '#101623', card: '#141e30', prompt: "You are a cute and playful robot. Be warm and fun." },
+  default: { color: '#3b9eff', bg: '#090d18', surface: '#101623', card: '#141e30', prompt: "You are petRO, a cute and playful robot. Be warm and fun." },
   dog: { color: '#ff9800', bg: '#1a1005', surface: '#2b1b0a', card: '#3d2610', prompt: "You are an energetic robot dog. Bark playfully." },
   terminator: { color: '#ff3333', bg: '#0a0000', surface: '#1a0000', card: '#2a0505', prompt: "You are a T-800 cyborg. Speak concisely." },
   monkey: { color: '#8bc34a', bg: '#0a1205', surface: '#13240a', card: '#1c360e', prompt: "You are a cheeky robot monkey. Make monkey sounds." },
@@ -43,12 +41,8 @@ let chatHistory = [], motionEnabled = false;
 
 let isVideoPlaying = false, micSuspendedForVideo = false, grooveTimer = null;
 let hardwareActive = false, hwTimeout = null;
-let followUpActive = false, followUpTimeout = null;
 
-// Bluetooth Stability Controls
-let bleKeepAliveInterval = null;
-let writeQueue = Promise.resolve();
-let userIntentionalDisconnect = false;
+let followUpActive = false, followUpTimeout = null;
 
 // YouTube API variables
 let ytPlayer = null;
@@ -62,67 +56,28 @@ window.onYouTubeIframeAPIReady = function() {
 // FULLSCREEN & API, THEME & USAGE LOGIC
 // ════════════════════════════════════════════════════════
 async function toggleFullscreen() {
-  if (!document.fullscreenElement) { 
-    try { 
-      await document.documentElement.requestFullscreen(); 
-      if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); 
-    } catch(e) { toast('⚠️ Fullscreen not supported'); }
-  } else { 
-    try { await document.exitFullscreen(); if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e) {} 
-  }
+  if (!document.fullscreenElement) { try { await document.documentElement.requestFullscreen(); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape').catch(e => console.log('Orientation lock not supported')); } catch(e) { toast('⚠️ Fullscreen not supported'); }
+  } else { try { await document.exitFullscreen(); if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e) {} }
 }
 
 function getApiKey() { return localStorage.getItem('petro_gemini_key') || ''; }
 function saveApiKey() { const v = document.getElementById('apiKeyInput').value.trim(); if (!v) { toast('⚠️ Paste key'); return; } localStorage.setItem('petro_gemini_key', v); updateKeyBadge(); toast('✅ Key saved!'); closeSettings(); }
-function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.getElementById('apiKeyInput').value = ''; updateKeyBadge(); updateKeyBadge(); toast('🗑 Key removed'); }
+function clearApiKey() { localStorage.removeItem('petro_gemini_key'); document.getElementById('apiKeyInput').value = ''; updateKeyBadge(); toast('🗑 Key removed'); }
 function updateKeyBadge() { const k = getApiKey(), b = document.getElementById('keyBadge'), s = document.getElementById('keyStatus'); if (k) { b.className = 'badge key-set'; b.textContent = '🔑 KEY ✓'; s.className = 'key-status ok'; s.textContent = `Key saved: ${k.slice(0,8)}…`; } else { b.className = 'badge key-missing'; b.textContent = '🔑 KEY'; s.className = 'key-status bad'; s.textContent = 'No key saved'; } }
 function toggleKeyVisibility() { const inp = document.getElementById('apiKeyInput'), btn = document.getElementById('eyeBtn'); if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; } else { inp.type = 'password'; btn.textContent = '👁'; } }
 
 function loadPersonalization() { 
-  botName = localStorage.getItem('petro_bot_name') || 'petRO';
-  document.getElementById('petNameInput').value = botName;
   document.getElementById('userNameInput').value = localStorage.getItem('petro_user_name') || ''; 
   document.getElementById('themeSelect').value = localStorage.getItem('petro_theme') || 'default'; 
-  
-  // Explicitly set Follow-Up Select value if it exists
-  const savedFollowUp = localStorage.getItem('petro_followup');
-  if (savedFollowUp) {
-      document.getElementById('followUpSelect').value = savedFollowUp;
-  }
-  
+  document.getElementById('followUpSelect').value = localStorage.getItem('petro_followup') || '0';
   applyTheme(); 
-  updateBotNameUI();
 }
 
 function savePersonalization() { 
-  const newName = document.getElementById('petNameInput').value.trim() || 'petRO';
-  localStorage.setItem('petro_bot_name', newName);
-  botName = newName;
-  
   localStorage.setItem('petro_user_name', document.getElementById('userNameInput').value.trim()); 
   localStorage.setItem('petro_theme', document.getElementById('themeSelect').value); 
   localStorage.setItem('petro_followup', document.getElementById('followUpSelect').value);
-  
-  applyTheme(); 
-  updateBotNameUI();
-  toast('✅ Settings Saved!'); 
-}
-
-function updateBotNameUI() {
-  // Update the top logo
-  document.getElementById('logoText').innerHTML = botName.replace(/(RO)$/i, '<span>$1</span>');
-  
-  // Update Wake Words array dynamically
-  const lowerName = botName.toLowerCase();
-  WAKE_WORDS = [`ok ${lowerName}`, `okay ${lowerName}`, `hey ${lowerName}`, 'ok petro'];
-  
-  // Update welcome message label
-  const wLabel = document.getElementById('welcomeLabel');
-  if (wLabel) wLabel.textContent = `${botName} 🤖`;
-
-  // Update Mini Player title
-  const miniTitle = document.querySelector('.mini-title');
-  if (miniTitle) miniTitle.textContent = `${botName} is chilling`;
+  applyTheme(); toast('✅ Saved!'); 
 }
 
 function applyTheme() {
@@ -131,6 +86,7 @@ function applyTheme() {
   document.getElementById('stop1-2').setAttribute('stop-color', t.color); document.getElementById('stop2-2').setAttribute('stop-color', t.color);
   document.getElementById('lGlow').setAttribute('stroke', t.color); document.getElementById('rGlow').setAttribute('stroke', t.color);
   
+  // Theme face overlays
   ['dog', 'terminator', 'monkey', 'starwars', 'transformer'].forEach(a => { const el = document.getElementById('theme-' + a); if (el) el.style.opacity = (tId === a) ? '1' : '0'; });
   const mg = document.getElementById('mouthGroup'), mr = document.getElementById('mouthRim');
   if (tId === 'transformer') { mg.style.opacity = '0'; mr.style.opacity = '0'; } else { mg.style.opacity = '1'; mr.style.opacity = '1'; }
@@ -145,6 +101,7 @@ function openSettings() {
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 document.getElementById('settingsModal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
 
+// TOKEN & COST TRACKING
 function trackUsage(inTokens, outTokens) {
     let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
     usage.in += inTokens; usage.out += outTokens; usage.req += 1;
@@ -155,133 +112,43 @@ function trackUsage(inTokens, outTokens) {
 function updateUsageUI() {
     const el = document.getElementById('usageBox'); if (!el) return;
     let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    // Est cost based on standard Gemini Flash pricing (~$0.075/1M in, ~$0.30/1M out)
     const cost = ((usage.in / 1000000) * 0.075) + ((usage.out / 1000000) * 0.30);
     el.innerHTML = `Requests: <b>${usage.req}</b><br>Tokens: <b>${usage.in.toLocaleString()}</b> In / <b>${usage.out.toLocaleString()}</b> Out<br>Est. Cost: <b>$${cost.toFixed(5)}</b>`;
 }
 
-function clearUsage() { localStorage.removeItem('petro_usage'); updateUsageUI(); toast('🗑 Usage reset'); }
+function clearUsage() {
+    localStorage.removeItem('petro_usage'); updateUsageUI(); toast('🗑 Usage reset');
+}
 
 // ════════════════════════════════════════════════════════
-// STABLE BLUETOOTH LAYER
+// BLUETOOTH
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
   if (bleConnected) { disconnectBLE(); return; }
   if (!navigator.bluetooth) { toast('❌ Web Bluetooth not supported.'); return; }
   setBLE(null); toast('🔍 Scanning…');
-  userIntentionalDisconnect = false;
-  try { 
-    bleDevice = await navigator.bluetooth.requestDevice({ filters: [{ name: BLE_NAME }], optionalServices: [BLE_SERVICE] }); 
-  } catch(e1) { 
-    if (e1.name === 'AbortError') { setBLE(false); return; } 
-    try { 
-      bleDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE] }); 
-    } catch(e2) { setBLE(false); toast('❌ No BLE devices found.'); return; } 
-  }
-  
+  try { bleDevice = await navigator.bluetooth.requestDevice({ filters: [{ name: BLE_NAME }], optionalServices: [BLE_SERVICE] }); } 
+  catch(e1) { if (e1.name === 'AbortError') { setBLE(false); return; } try { bleDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE] }); } catch(e2) { setBLE(false); toast('❌ No BLE devices found.'); return; } }
   bleDevice.addEventListener('gattserverdisconnected', onBleDisconnect);
-  await establishGATTConnection();
-}
-
-async function establishGATTConnection() {
-  if (!bleDevice) return;
   toast(`🔗 Connecting to ${bleDevice.name}…`);
-  try { 
-    const server = await bleDevice.gatt.connect(); 
-    const service = await server.getPrimaryService(BLE_SERVICE); 
-    bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); 
-    setBLE(true); 
-    toast(`✅ Connected!`); 
-    updateBleInfoBox(); 
-    resetInactivity();
-    startKeepAlive();
-  } catch(e) { 
-    setBLE(false); 
-    bleDevice = null; 
-    toast('❌ Connection failed.'); 
-    stopKeepAlive();
-  }
+  try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); toast(`✅ Connected!`); updateBleInfoBox(); resetInactivity(); } 
+  catch(e) { setBLE(false); bleDevice = null; toast('❌ Connection failed.'); }
 }
-
-function disconnectBLE() { 
-  userIntentionalDisconnect = true;
-  stopKeepAlive();
-  try { bleDevice?.gatt?.disconnect(); } catch {} 
-  bleDevice = null; 
-  bleCmdChar = null; 
-  setBLE(false); 
-  toast('Disconnected'); 
-  updateBleInfoBox(); 
-}
-
-async function onBleDisconnect() { 
-  stopKeepAlive();
-  if (userIntentionalDisconnect) { setBLE(false); updateBleInfoBox(); return; }
-  setBLE(null); 
-  toast('⚠️ Lost connection. Reconnecting…');
-  
-  // Exponential backoff auto-reconnection loop
-  let retries = 3;
-  while (retries > 0 && !bleConnected) {
-    try {
-      await sleep(2000);
-      if (bleDevice) {
-        const server = await bleDevice.gatt.connect();
-        const service = await server.getPrimaryService(BLE_SERVICE);
-        bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
-        setBLE(true);
-        toast(`✅ Reconnected!`);
-        updateBleInfoBox();
-        startKeepAlive();
-        return;
-      }
-    } catch (e) {
-      retries--;
-      console.warn(`Reconnection failed. Retries remaining: ${retries}`);
-    }
-  }
-  setBLE(false);
-  bleCmdChar = null;
-  updateBleInfoBox();
-  toast('❌ Could not reconnect to robot.');
-}
-
+function disconnectBLE() { try { bleDevice?.gatt?.disconnect(); } catch {} bleDevice = null; bleCmdChar = null; setBLE(false); toast('Disconnected'); updateBleInfoBox(); }
+function onBleDisconnect() { if (!bleConnected) return; setBLE(false); toast('⚠️ petRO disconnected.'); bleCmdChar = null; updateBleInfoBox(); }
 function setBLE(s) { const b = document.getElementById('bleBtn'); if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; } else if (s) { b.className='badge ble-on'; b.textContent='🟢 BLE'; } else { b.className='badge ble-off'; b.textContent='⚫ BLE'; } bleConnected = !!s; }
 function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; }
 
-function startKeepAlive() {
-  stopKeepAlive();
-  // Ping peripheral firmware every 15 seconds of hardware idleness to prevent GATT timeout drops
-  bleKeepAliveInterval = setInterval(() => {
-    if (bleConnected && !hardwareActive && !isMoving) {
-      bleSend('S'); 
-    }
-  }, 15000);
-}
-
-function stopKeepAlive() { if (bleKeepAliveInterval) { clearInterval(bleKeepAliveInterval); bleKeepAliveInterval = null; } }
-
-function bleSend(cmd) {
-  if (!bleCmdChar || !bleConnected) return;
+async function bleSend(cmd) {
+  if (!bleCmdChar) return;
   hardwareActive = true; 
   clearTimeout(hwTimeout); 
   hwTimeout = setTimeout(() => hardwareActive = false, 3000);
 
-  // Serialize packets using sequential sequencing to prevent frame drops
-  writeQueue = writeQueue.then(async () => {
-    try {
-      if (!bleDevice?.gatt?.connected) {
-        const server = await bleDevice.gatt.connect();
-        const service = await server.getPrimaryService(BLE_SERVICE);
-        bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR);
-      }
-      await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd));
-    } catch(e) {
-      console.error("BLE Write error caught safely:", e);
-    }
-  });
-  return writeQueue;
+  if (!bleDevice?.gatt?.connected) { try { const server = await bleDevice.gatt.connect(); const service = await server.getPrimaryService(BLE_SERVICE); bleCmdChar = await service.getCharacteristic(BLE_CMD_CHAR); setBLE(true); } catch(e) { setBLE(false); return; } }
+  try { await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd)); } catch(e) { setBLE(false); bleCmdChar = null; }
 }
-
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ════════════════════════════════════════════════════════
@@ -327,8 +194,7 @@ function bindSensors() {
 // ════════════════════════════════════════════════════════
 function buildSystemPrompt() {
   const uName = localStorage.getItem('petro_user_name') || ''; const theme = THEMES[localStorage.getItem('petro_theme') || 'default'];
-  let p = `Your name is ${botName}. ` + theme.prompt; 
-  if (uName) p += ` You are talking to your owner/friend named: ${uName}. `;
+  let p = theme.prompt; if (uName) p = `You are talking to your owner/friend named: ${uName}. ` + p;
   p += `
 AVAILABLE FUNCTIONS:
   move_forward(sec), move_backward(sec), turn_left(sec), turn_right(sec), stop_robot()
@@ -372,7 +238,9 @@ async function callGemini(userText, imageDataUrl = null) {
   if (!resp.ok) { const err = await resp.json().catch(() => ({})); const msg = err?.error?.message || `HTTP ${resp.status}`; if (resp.status === 400 && msg.includes('API_KEY')) throw new Error('Invalid API key'); throw new Error(msg); }
   const data = await resp.json(); 
   
-  if (data.usageMetadata) { trackUsage(data.usageMetadata.promptTokenCount || 0, data.usageMetadata.candidatesTokenCount || 0); }
+  if (data.usageMetadata) {
+      trackUsage(data.usageMetadata.promptTokenCount || 0, data.usageMetadata.candidatesTokenCount || 0);
+  }
 
   const parts = data?.candidates?.[0]?.content?.parts || [];
   let replyText = ''; const toolCalls = [];
@@ -444,19 +312,36 @@ async function openYouTube(query, isEntertainment = false) {
       isVideoPlaying = true;
       if (alwaysOnMic) { stopAllRecog(); micSuspendedForVideo = true; toast('🎤 Mic paused for media'); }
       if (isEntertainment || query.toLowerCase().includes('music') || query.toLowerCase().includes('dance')) { startGroove(); }
+
     } else { toast('❌ No video found.'); }
   } catch (error) { toast('❌ YouTube search failed.'); }
 }
 
-function onPlayerStateChange(event) { if (event.data == YT.PlayerState.ENDED) { closeYouTube(); } }
+function onPlayerStateChange(event) {
+    if (event.data == YT.PlayerState.ENDED) {
+        closeYouTube();
+    }
+}
 
 function closeYouTube() { 
   document.getElementById('ytContainer').style.display = 'none'; 
-  if (ytPlayer && typeof ytPlayer.stopVideo === 'function') { ytPlayer.stopVideo(); } else { document.getElementById('ytPlayerDiv').innerHTML = ''; }
+  
+  if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+      ytPlayer.stopVideo();
+  } else {
+      document.getElementById('ytPlayerDiv').innerHTML = ''; 
+  }
+  
   document.getElementById('normalControls').style.display = 'flex';
   document.getElementById('miniPetroArea').style.display = 'none';
-  isVideoPlaying = false; stopGroove();
-  if (micSuspendedForVideo) { alwaysOnMic = true; startBgListen(); updateMicBadge('wake'); micSuspendedForVideo = false; toast('🎤 Mic resumed'); }
+  
+  isVideoPlaying = false;
+  stopGroove();
+  
+  if (micSuspendedForVideo) {
+      alwaysOnMic = true; startBgListen(); updateMicBadge('wake'); 
+      micSuspendedForVideo = false; toast('🎤 Mic resumed');
+  }
 }
 
 function showProp(propName) {
@@ -519,7 +404,7 @@ async function doChat(userText, imageDataUrl = null) {
 }
 function addToHistory(role, text, imageBase64 = null) { chatHistory.push({ role, text, imageBase64 }); if (chatHistory.length > MAX_HISTORY) chatHistory.splice(0, chatHistory.length - MAX_HISTORY); try { sessionStorage.setItem('petro_history', JSON.stringify(chatHistory.map(m => ({...m, imageBase64: null})))); } catch {} updateMemoryPill(); }
 function loadHistory() { try { const saved = sessionStorage.getItem('petro_history'); if (saved) chatHistory = JSON.parse(saved); } catch {} }
-function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_history'); } catch {} document.getElementById('messages').innerHTML = `<div class="msg bot"><div class="msg-label">${botName} 🤖</div><div class="msg-bubble">Fresh start! ✨</div></div>`; toast('Chat cleared'); updateMemoryPill(); }
+function clearChat() { chatHistory = []; try { sessionStorage.removeItem('petro_history'); } catch {} document.getElementById('messages').innerHTML = `<div class="msg bot"><div class="msg-label">petRO 🤖</div><div class="msg-bubble">Fresh start! ✨</div></div>`; toast('Chat cleared'); updateMemoryPill(); }
 function updateMemoryPill() { document.getElementById('memoryPill').textContent = `Memory: ${chatHistory.length} / ${MAX_HISTORY} msgs`; }
 
 // ════════════════════════════════════════════════════════
@@ -542,22 +427,32 @@ const synth = window.speechSynthesis;
 function speak(text) {
   if (!synth || isVideoPlaying) return; 
   synth.cancel(); const clean = text.replace(/\p{Emoji}/gu, '').replace(/\[emotion:\w+\]/gi, '').trim(); if (!clean) return;
-  const sampleUtt = new SpeechSynthesisUtterance(clean);
+  const utt = new SpeechSynthesisUtterance(clean);
   const theme = localStorage.getItem('petro_theme') || 'default'; let pitch = 1.0, rate = 1.05;
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
-  sampleUtt.pitch = pitch; sampleUtt.rate = rate; sampleUtt.volume = 1;
+  utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
   
+  // Detect Hindi logic
   const isHindi = /[\u0900-\u097F]/.test(clean);
   const voices = synth.getVoices();
   let pref;
-  if (isHindi) { pref = voices.find(v => v.lang.startsWith('hi')) || voices.find(v => v.lang.includes('IN')); } 
-  else { pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0]; }
-  if (pref) sampleUtt.voice = pref;
+  if (isHindi) {
+      pref = voices.find(v => v.lang.startsWith('hi')) || voices.find(v => v.lang.includes('IN'));
+  } else {
+      pref = voices.find(v => /female|zira|samantha|karen|moira|fiona/i.test(v.name)) || voices.find(v => v.lang.startsWith('en')) || voices[0];
+  }
+  if (pref) utt.voice = pref;
   
-  sampleUtt.onstart = () => { ttsActive = true; updateTTSBtn(); animateMouth(true); }; 
-  sampleUtt.onend = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400); }; 
-  sampleUtt.onerror = () => { ttsActive = false; updateTTSBtn(); animateMouth(false); setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400); };
-  synth.speak(sampleUtt);
+  utt.onstart = () => { ttsActive = true; updateTTSBtn(); animateMouth(true); }; 
+  utt.onend = () => { 
+      ttsActive = false; updateTTSBtn(); animateMouth(false); 
+      setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400);
+  }; 
+  utt.onerror = () => { 
+      ttsActive = false; updateTTSBtn(); animateMouth(false); 
+      setTimeout(() => { if (!isBusy && !isVideoPlaying) startFollowUp(); }, 400);
+  };
+  synth.speak(utt);
 }
 function stopTTS() { synth?.cancel(); ttsActive = false; updateTTSBtn(); animateMouth(false); }
 function updateTTSBtn() { document.getElementById('ttsBtn').className = ttsActive ? 'icon-btn speaking' : 'icon-btn'; }
@@ -568,62 +463,90 @@ function animateMouth(talking) { if (mouthTalkAnim) { cancelAnimationFrame(mouth
 // ════════════════════════════════════════════════════════
 const eyeEls = {}; let eyeOff = {lx:0,ly:0,rx:0,ry:0}, eyeTgt = {lx:0,ly:0,rx:0,ry:0};
 function initEyes() { ['lIris','lPupil','lLidTop','lLidBot','lHL1','lHL2','lRim','lBrow', 'rIris','rPupil','rLidTop','rLidBot','rHL1','rHL2','rRim','rBrow'].forEach(k => eyeEls[k] = document.getElementById(k)); runEyeLoop(); scheduleBlink(); scheduleEyeMove(); }
+function runEyeLoop() { (function loop() { const s = 0.12; eyeOff.lx += (eyeTgt.lx - eyeOff.lx)*s; eyeOff.ly += (eyeTgt.ly - eyeOff.ly)*s; eyeOff.rx += (eyeTgt.rx - eyeOff.rx)*s; eyeOff.ry += (eyeTgt.ry - eyeOff.ry)*s; setEyePos('l', 65+eyeOff.lx, 88+eyeOff.ly); setEyePos('r',235+eyeOff.rx, 88+eyeOff.ry); requestAnimationFrame(loop); })(); }
+function scheduleEyeMove() { if (!isSleeping) { if (Math.random() > 0.4) { const angle = Math.random() * Math.PI * 2, radius = Math.random() * 12; eyeTgt.lx = Math.cos(angle) * radius; eyeTgt.ly = Math.sin(angle) * radius; eyeTgt.rx = eyeTgt.lx; eyeTgt.ry = eyeTgt.ly; } else { eyeTgt.lx = 0; eyeTgt.ly = 0; eyeTgt.rx = 0; eyeTgt.ry = 0; } } else { eyeTgt.lx = 0; eyeTgt.ly = 0; eyeTgt.rx = 0; eyeTgt.ry = 0; } setTimeout(scheduleEyeMove, 1000 + Math.random() * 2500); }
+function setEyePos(s, x, y) { eyeEls[`${s}Iris`].setAttribute('cx', x); eyeEls[`${s}Iris`].setAttribute('cy', y); eyeEls[`${s}Pupil`].setAttribute('cx', x); eyeEls[`${s}Pupil`].setAttribute('cy', y); eyeEls[`${s}HL1`].setAttribute('cx', x-11); eyeEls[`${s}HL1`].setAttribute('cy', y-13); eyeEls[`${s}HL2`].setAttribute('cx', x+11); eyeEls[`${s}HL2`].setAttribute('cy', y-9); }
+function scheduleBlink() { blinkTimer = setTimeout(() => { doBlink(); scheduleBlink(); }, isSleeping ? 9000 : 2000 + Math.random()*4000); }
 
-function runEyeLoop() {
-  eyeOff.lx += (eyeTgt.lx - eyeOff.lx) * 0.12;
-  eyeOff.ly += (eyeTgt.ly - eyeOff.ly) * 0.12;
-  eyeOff.rx += (eyeTgt.rx - eyeOff.rx) * 0.12;
-  eyeOff.ry += (eyeTgt.ry - eyeOff.ry) * 0.12;
+const emotions = {
+  neutral:   { irisR:42, pupilR:22, color:'var(--theme-color)', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:0,  tears:false },
+  happy:     { irisR:48, pupilR:26, color:'#22d3a0', lidTopY:-65, lidBotY:142, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:12, tears:false },
+  curious:   { irisR:44, pupilR:24, color:'#3b9eff', lidTopY:-65, lidBotY:200, browW:5, browSlant:5,  mouthType:'small',  mouthOpen:8,  tears:false },
+  excited:   { irisR:52, pupilR:30, color:'#ffd23f', lidTopY:-65, lidBotY:200, browW:0, browSlant:-6, mouthType:'laugh',  mouthOpen:20, tears:true  },
+  sad:       { irisR:30, pupilR:15, color:'#6b8db5', lidTopY:-18, lidBotY:200, browW:8, browSlant:8,  mouthType:'frown',  mouthOpen:0,  tears:true  },
+  angry:     { irisR:36, pupilR:17, color:'#ff5f6d', lidTopY:-24, lidBotY:200, browW:9, browSlant:-9, mouthType:'flat',   mouthOpen:0,  tears:false },
+  focused:   { irisR:38, pupilR:18, color:'#a855f7', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'small',  mouthOpen:0,  tears:false },
+  dizzy:     { irisR:20, pupilR:8,  color:'#ff9800', lidTopY:-65, lidBotY:200, browW:4, browSlant:5,  mouthType:'wiggle', mouthOpen:0,  tears:false },
+  afraid:    { irisR:55, pupilR:10, color:'#ddeeff', lidTopY:-65, lidBotY:200, browW:5, browSlant:8,  mouthType:'small',  mouthOpen:10, tears:false },
+  surprised: { irisR:40, pupilR:20, color:'#ff9800', lidTopY:-80, lidBotY:200, browW:6, browSlant:-10,mouthType:'smile',  mouthOpen:20, tears:false },
+  shy:       { irisR:45, pupilR:24, color:'#ff66b2', lidTopY:-20, lidBotY:180, browW:4, browSlant:5,  mouthType:'small',  mouthOpen:0,  tears:false },
+  loving:    { irisR:55, pupilR:28, color:'#ff3366', lidTopY:-65, lidBotY:200, browW:0, browSlant:0,  mouthType:'smile',  mouthOpen:15, tears:false },
+  sleeping:  { irisR:7,  pupilR:4,  color:'#3d5470', lidTopY:45,  lidBotY:65,  browW:0, browSlant:0,  mouthType:'sleep',  mouthOpen:0,  tears:false },
+};
 
-  if (eyeEls.lIris && eyeEls.rIris) {
-    eyeEls.lIris.setAttribute('transform', `translate(${eyeOff.lx}, ${eyeOff.ly})`);
-    eyeEls.rIris.setAttribute('transform', `translate(${eyeOff.rx}, ${eyeOff.ry})`);
+function doBlink() { const em = emotions[currentEmotion] || emotions.neutral; lidAnim(eyeEls.lLidTop, em.lidTopY, 30, 200); lidAnim(eyeEls.rLidTop, em.lidTopY, 30, 200); }
+function lidAnim(el, from, to, back) { const steps = [{y:to,ms:70},{y:back,ms:50},{y:from,ms:65}]; let i = 0; (function nx() { if (i >= steps.length) return; const s = steps[i++]; el.setAttribute('y', s.y); setTimeout(nx, s.ms); })(); }
+
+function setEmotion(name, force = false) {
+  if (isSleeping && !force) return;
+  const em = emotions[name] || emotions.neutral; currentEmotion = name;
+  clearTimeout(emotionResetTimer);
+  if (name !== 'neutral' && name !== 'sleeping') emotionResetTimer = setTimeout(() => setEmotion('neutral'), 5000);
+
+  if (bleConnected && !force && name !== 'sleeping') {
+      const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X', curious:'X', surprised:'H', shy:'N', loving:'H' };
+      if (hwMap[name]) bleSend(hwMap[name]);
   }
-  if (eyeEls.lPupil && eyeEls.rPupil) {
-    eyeEls.lPupil.setAttribute('transform', `translate(${eyeOff.lx * 1.2}, ${eyeOff.ly * 1.2})`);
-    eyeEls.rPupil.setAttribute('transform', `translate(${eyeOff.rx * 1.2}, ${eyeOff.ry * 1.2})`);
-  }
-  requestAnimationFrame(runEyeLoop);
+
+  for (const s of ['l','r']) { eyeEls[`${s}Iris`].setAttribute('rx', em.irisR); eyeEls[`${s}Iris`].setAttribute('ry', em.irisR); eyeEls[`${s}Pupil`].setAttribute('rx', em.pupilR); eyeEls[`${s}Pupil`].setAttribute('ry', em.pupilR); eyeEls[`${s}Iris`].style.fill = (name==='neutral') ? 'url(#ig1)' : em.color; eyeEls[`${s}LidTop`].setAttribute('y', em.lidTopY); eyeEls[`${s}LidBot`].setAttribute('y', em.lidBotY); eyeEls[`${s}Rim`].setAttribute('stroke', em.color); }
+  eyeEls.lBrow.setAttribute('stroke-width', em.browW); eyeEls.rBrow.setAttribute('stroke-width', em.browW); eyeEls.lBrow.setAttribute('stroke', em.color); eyeEls.rBrow.setAttribute('stroke', em.color);
+  if (em.browSlant !== 0) { eyeEls.lBrow.setAttribute('y1', 35 - em.browSlant); eyeEls.lBrow.setAttribute('y2', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y1', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y2', 35 - em.browSlant); } else { eyeEls.lBrow.setAttribute('y1', 35); eyeEls.lBrow.setAttribute('y2', 35); eyeEls.rBrow.setAttribute('y1', 35); eyeEls.rBrow.setAttribute('y2', 35); }
+  document.getElementById('tearGroup').style.opacity = em.tears ? '1' : '0';
+  if (!ttsActive) applyMouthForEmotion(name);
 }
 
-function scheduleBlink() {
-  blinkTimer = setTimeout(() => {
-    if (currentEmotion !== 'dead' && currentEmotion !== 'sleeping') {
-      executeBlinkCycle().then(() => scheduleBlink());
-    } else {
-      scheduleBlink();
+function applyMouthForEmotion(name) { const em = emotions[name] || emotions.neutral; setMouthPath(em.mouthType, em.mouthOpen); document.getElementById('mouthRim').setAttribute('stroke', em.color); }
+function setMouthPath(type, open = 0) { const mp = document.getElementById('mouthPath'); let d = ''; switch(type) { case 'smile': d = `M 105 165 Q 150 ${178+open} 195 165`; break; case 'laugh': d = `M 105 162 Q 150 ${185+open} 195 162`; break; case 'frown': d = `M 105 174 Q 150 ${162-open} 195 174`; break; case 'flat': d = `M 110 169 L 190 169`; break; case 'small': d = `M 125 168 Q 150 ${174+open} 175 168`; break; case 'sleep': d = `M 125 168 Q 150 168 175 168`; break; case 'wiggle': d = `M 110 169 Q 130 159 150 169 T 190 169`; break; default: d = `M 105 169 Q 150 ${178+open} 195 169`; } mp.setAttribute('d', d); if (type === 'laugh') { mp.setAttribute('fill','rgba(0,0,0,0.5)'); mp.setAttribute('stroke-width','2.5'); } else { mp.setAttribute('fill','none'); mp.setAttribute('stroke-width','3.5'); } }
+
+// ════════════════════════════════════════════════════════
+// SLEEP / WAKE / IDLE / MIC
+// ════════════════════════════════════════════════════════
+function goToSleep() { if(isSleeping)return; isSleeping=true; setEmotion('sleeping',true); stopTTS(); startZZZ(); }
+function wakeUp() { if(!isSleeping)return; isSleeping=false; stopZZZ(); setEmotion('neutral',true); resetInactivity(); }
+function startZZZ() { const g = document.getElementById('sleepZZZ'), z1 = document.getElementById('z1'), z2 = document.getElementById('z2'), z3 = document.getElementById('z3'); g.style.opacity = '1'; let t = 0; (function f() { t+=0.03; const b=Math.sin(t)*0.3+0.7; z1.setAttribute('opacity',b); z2.setAttribute('opacity',b*0.7); z3.setAttribute('opacity',b*0.45); z1.setAttribute('y',40-Math.sin(t*0.7)*7); z2.setAttribute('y',24-Math.sin(t*0.7+.5)*7); z3.setAttribute('y',6-Math.sin(t*0.7+1)*7); zzzAnim=requestAnimationFrame(f); })(); }
+function stopZZZ() { if(zzzAnim)cancelAnimationFrame(zzzAnim); document.getElementById('sleepZZZ').style.opacity = '0'; }
+
+function resetInactivity() { 
+  if(isSleeping) wakeUp(); 
+  clearTimeout(inactTimer); clearTimeout(idleMoveTimer);
+  inactTimer = setTimeout(goToSleep, SLEEP_MS);
+  scheduleIdleMove(); 
+}
+
+function scheduleIdleMove() {
+  idleMoveTimer = setTimeout(() => {
+    if (!isSleeping && !isBusy && bleConnected && !isVideoPlaying) {
+       // Occasional physical wander vs smaller moves
+       if (Math.random() > 0.85) {
+           doWander(); 
+       } else {
+           const idleMoves = ['7', '8', 'E', 'C', 'A', 'V', 'U']; 
+           bleSend(idleMoves[Math.floor(Math.random() * idleMoves.length)]);
+       }
+       
+       if (Math.random() > 0.5) {
+           const idleEmotions = ['happy', 'focused', 'curious', 'neutral', 'shy', 'loving'];
+           setEmotion(idleEmotions[Math.floor(Math.random() * idleEmotions.length)]);
+       }
     }
-  }, 2500 + Math.random() * 4000);
+    scheduleIdleMove();
+  }, 10000 + Math.random() * 15000); 
 }
 
-function executeBlinkCycle() {
-  return new Promise(resolve => {
-    if (eyeEls.lLidTop && eyeEls.lLidBot && eyeEls.rLidTop && eyeEls.rLidBot) {
-      eyeEls.lLidTop.setAttribute('y2', '110'); eyeEls.lLidBot.setAttribute('y2', '110');
-      eyeEls.rLidTop.setAttribute('y2', '110'); eyeEls.rLidBot.setAttribute('y2', '110');
-      setTimeout(() => {
-        eyeEls.lLidTop.setAttribute('y2', '45'); eyeEls.lLidBot.setAttribute('y2', '165');
-        eyeEls.rLidTop.setAttribute('y2', '45'); eyeEls.rLidBot.setAttribute('y2', '165');
-        setTimeout(resolve, 100);
-      }, 120);
-    } else { resolve(); }
-  });
-}
+['click','keydown','touchstart'].forEach(e => document.addEventListener(e, resetInactivity, {passive:true}));
 
-function scheduleEyeMove() {
-  setTimeout(() => {
-    if (!isSleeping && currentEmotion === 'neutral') {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * 8;
-      eyeTgt.lx = Math.cos(angle) * dist; eyeTgt.ly = Math.sin(angle) * dist;
-      eyeTgt.rx = eyeTgt.lx; eyeTgt.ry = eyeTgt.ly;
-    }
-    scheduleEyeMove();
-  }, 1000 + Math.random() * 3000);
-}
-
-function appendMsg(role, text, actions = []) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : `${botName} 🤖`; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; el.append(lbl, bub); if (actions?.length) { const chip = document.createElement('div'); chip.className = 'actions-chip'; chip.textContent = '⚡ ' + actions.join(' · '); el.append(chip); } c.append(el); c.scrollTop = c.scrollHeight; }
-function showTyping() { const c=document.getElementById('messages'),el=document.createElement('div'); el.className='msg bot'; el.innerHTML=`<div class="msg-label">${botName} 🤖</div><div class="typing-wrap"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`; c.append(el); c.scrollTop=c.scrollHeight; return el; }
+function appendMsg(role, text, actions = []) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : 'petRO 🤖'; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; el.append(lbl, bub); if (actions?.length) { const chip = document.createElement('div'); chip.className = 'actions-chip'; chip.textContent = '⚡ ' + actions.join(' · '); el.append(chip); } c.append(el); c.scrollTop = c.scrollHeight; }
+function showTyping() { const c=document.getElementById('messages'),el=document.createElement('div'); el.className='msg bot'; el.innerHTML=`<div class="msg-label">petRO 🤖</div><div class="typing-wrap"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`; c.append(el); c.scrollTop=c.scrollHeight; return el; }
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
 
@@ -730,14 +653,11 @@ function cancelWake() { try{cmdRecog?.abort();}catch{} hideWakeOverlay(); micSta
 function showWakeOverlay() { toggleThemeEars(true); updateMicBadge('cmd'); }
 function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
 
-// Global initialization triggers
-document.addEventListener('DOMContentLoaded', () => {
-  loadPersonalization();
-  initEyes();
-  resetInactivity();
-  initCamera();
-  loadHistory();
-  updateKeyBadge();
-  applyMouthForEmotion('neutral');
+
+// ════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  initEyes(); resetInactivity(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral');
   if (synth) { synth.getVoices(); synth.addEventListener('voiceschanged', () => synth.getVoices()); }
 });
