@@ -112,6 +112,7 @@ function trackUsage(inTokens, outTokens) {
 function updateUsageUI() {
     const el = document.getElementById('usageBox'); if (!el) return;
     let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    // Est cost based on standard Gemini Flash pricing (~$0.075/1M in, ~$0.30/1M out)
     const cost = ((usage.in / 1000000) * 0.075) + ((usage.out / 1000000) * 0.30);
     el.innerHTML = `Requests: <b>${usage.req}</b><br>Tokens: <b>${usage.in.toLocaleString()}</b> In / <b>${usage.out.toLocaleString()}</b> Out<br>Est. Cost: <b>$${cost.toFixed(5)}</b>`;
 }
@@ -124,21 +125,26 @@ function clearUsage() {
 // BLUETOOTH
 // ════════════════════════════════════════════════════════
 
+// --- Reconnect state (declared before use) ---
 let bleIntentionalDisconnect = false;
 let bleReconnectTimer = null;
 let bleReconnectAttempts = 0;
 const BLE_MAX_RECONNECT = 8;
 
+// --- Mutex queue: only ONE write in-flight at a time ---
+// Each call waits for the previous to fully resolve before starting.
 let _bleQueueTail = Promise.resolve();
 function bleSend(cmd) {
+  // Chain onto the tail; capture the new tail so next call waits on THIS one
   const next = _bleQueueTail.then(() => _bleWrite(cmd));
-  _bleQueueTail = next.catch(() => {});
-  return next;
+  _bleQueueTail = next.catch(() => {}); // prevent unhandled rejection on the shared tail
+  return next; // caller gets a promise that resolves/rejects for THIS write only
 }
 
 async function _bleWrite(cmd) {
   if (!bleDevice || bleIntentionalDisconnect) return;
 
+  // If GATT layer dropped, reconnect before writing
   if (!bleDevice.gatt.connected) {
     try {
       const server  = await bleDevice.gatt.connect();
@@ -147,7 +153,7 @@ async function _bleWrite(cmd) {
       _setBLEConnected(true);
     } catch(e) {
       _setBLEConnected(false);
-      throw e;
+      throw e; // propagate so caller knows the write didn't happen
     }
   }
 
@@ -155,6 +161,7 @@ async function _bleWrite(cmd) {
   try {
     await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd));
   } catch(e) {
+    // write failed — GATT probably dropped right now; let onBleDisconnect handle it
     _setBLEConnected(false);
     bleCmdChar = null;
     throw e;
@@ -188,10 +195,11 @@ function disconnectBLE() {
 }
 
 function onBleDisconnect() {
-  if (bleIntentionalDisconnect) return;
+  if (bleIntentionalDisconnect) return; // user pressed disconnect — don't reconnect
   _setBLEConnected(false);
   bleCmdChar = null;
   updateBleInfoBox();
+  // Start back-off reconnect
   bleReconnectAttempts = 0;
   _scheduleReconnect();
 }
@@ -203,7 +211,7 @@ function _scheduleReconnect() {
     return;
   }
   bleReconnectAttempts++;
-  const delay = Math.min(500 * bleReconnectAttempts, 6000);
+  const delay = Math.min(500 * bleReconnectAttempts, 6000); // 0.5s, 1s, 1.5s … max 6s
   toast(`⚠️ Disconnected. Reconnecting (${bleReconnectAttempts}/${BLE_MAX_RECONNECT})…`);
   clearTimeout(bleReconnectTimer);
   bleReconnectTimer = setTimeout(_attemptReconnect, delay);
@@ -220,10 +228,11 @@ async function _attemptReconnect() {
     setBLE(true); toast('✅ Reconnected!'); updateBleInfoBox();
   } catch(e) {
     _setBLEConnected(false);
-    _scheduleReconnect();
+    _scheduleReconnect(); // try again with increased delay
   }
 }
 
+// Sets the UI+flag WITHOUT triggering side-effects that cause more bleSend calls
 function _setBLEConnected(val) {
   bleConnected = val;
   const b = document.getElementById('bleBtn');
@@ -269,111 +278,72 @@ async function doWander() {
 // ════════════════════════════════════════════════════════
 // MOTION SENSORS
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// MOTION SENSORS
+// ════════════════════════════════════════════════════════
+let lastAccel = 0, motionSensorsbound = false;
+let motionCooldown = false; // debounce so robot's own vibrations don't re-trigger
+
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission().then(r => { if (r == 'granted') { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; } else toast('❌ Permission denied'); }).catch(console.error);
-  } else { motionEnabled = true; bindSensors(); toast('✅ Motion Synced'); document.getElementById('gyroBtn').style.display='none'; }
+    DeviceOrientationEvent.requestPermission()
+      .then(r => { if (r === 'granted') { motionEnabled = true; bindSensors(); updateGyroBtnState(); toast('✅ Motion Sync ON'); } else toast('❌ Permission denied'); })
+      .catch(console.error);
+  } else { motionEnabled = true; bindSensors(); updateGyroBtnState(); toast('✅ Motion Sync ON'); }
 }
 
-// ── MOTION: only react to sudden UPWARD lift (negative gravity-Z spike) ──
-// We track a rolling baseline of Z-axis gravity so normal rover movement
-// (forward/backward/turn) doesn't trigger reactions — only a genuine upward
-// pick-up does (Z goes strongly negative = phone lifted up fast).
-let _zBaseline = null;          // rolling average of Z-component
-let _zLastRaw  = null;          // previous raw Z sample
-let _motionCooldown = false;    // prevent rapid-fire triggers
+function toggleMotionSensors() {
+  if (!motionEnabled) { enableMotionSensors(); return; }
+  motionEnabled = false;
+  updateGyroBtnState();
+  toast('🚫 Motion Sync OFF');
+}
 
-function _updateZBaseline(z) {
-  if (_zBaseline === null) { _zBaseline = z; return; }
-  // Slow EMA so baseline tracks resting position but not fast transients
-  _zBaseline = _zBaseline * 0.97 + z * 0.03;
+function updateGyroBtnState() {
+  const btn = document.getElementById('gyroBtn');
+  if (!btn) return;
+  if (motionEnabled) {
+    btn.textContent = '🧭 Motion Sync ON';
+    btn.style.borderColor = 'var(--theme-color)';
+    btn.style.color = 'var(--theme-color)';
+  } else {
+    btn.textContent = '🧭 Enable Motion Sync';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
 }
 
 function bindSensors() {
+  if (motionSensorsbound) return; // only bind once
+  motionSensorsbound = true;
   window.addEventListener('devicemotion', (e) => {
-    if (isSleeping || !motionEnabled || isMoving || hardwareActive) return;
-
-    const acc = e.accelerationIncludingGravity;
-    if (!acc) return;
-
-    const z = acc.z;  // positive = face-up on table, negative = lifted up
-    if (_zLastRaw === null) { _zLastRaw = z; _zBaseline = z; return; }
-
-    // Update baseline with the previous sample (before this spike)
-    _updateZBaseline(_zLastRaw);
-    _zLastRaw = z;
-
-    if (_motionCooldown) return;
-
-    // Deviation from baseline: strongly negative Z means sudden upward lift
-    const deviation = z - _zBaseline;
-
-    // Only react to upward movement: deviation < -14 m/s² (sharp upward jerk)
-    // Ignore horizontal jolts (X/Y bumps from rover driving) by requiring
-    // the upward component to dominate: |deviation_z| must be > 1.5× combined X/Y
-    const lateral = Math.sqrt(acc.x * acc.x + acc.y * acc.y);
-    const isUpwardLift = deviation < -14 && Math.abs(deviation) > lateral * 1.5;
-
-    if (isUpwardLift) {
-      setEmotion('dizzy');
-      resetInactivity();
-      _motionCooldown = true;
-      setTimeout(() => { _motionCooldown = false; }, 2500);
+    // Skip if: disabled, sleeping, robot is actively moving/doing something, or in cooldown
+    if (!motionEnabled || isSleeping || hardwareActive || isBusy || motionCooldown) return;
+    let acc = e.accelerationIncludingGravity; if (!acc) return;
+    let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z);
+    // Raised threshold (was 25) — filters out robot motor vibrations reaching the phone
+    if (Math.abs(total - lastAccel) > 18) {
+      setEmotion('dizzy'); resetInactivity();
+      // Cooldown prevents motor-vibration bursts from spamming emotions
+      motionCooldown = true;
+      setTimeout(() => { motionCooldown = false; }, 1500);
     }
+    lastAccel = total;
   });
-
-  // Tilt/orientation: only react when phone is nearly vertical (held up)
-  // AND rover is not actively driving (hardwareActive / isMoving guards above handle BLE,
-  // but we also skip if orientation looks like it's just sitting flat on a table)
   window.addEventListener('deviceorientation', (e) => {
-    if (isSleeping || !motionEnabled || isMoving || hardwareActive) return;
-    // beta > 70° means the phone is very steeply tilted — unlikely to be rover motion
-    if (Math.abs(e.beta) > 70 || Math.abs(e.gamma) > 70) {
+    if (!motionEnabled || isSleeping || hardwareActive || isBusy || motionCooldown) return;
+    if (Math.abs(e.beta) > 60 || Math.abs(e.gamma) > 60) {
       if (currentEmotion !== 'afraid') { setEmotion('afraid'); resetInactivity(); }
+      motionCooldown = true;
+      setTimeout(() => { motionCooldown = false; }, 1500);
     }
   });
 }
 
-// ════════════════════════════════════════════════════════
-// TOUCH REACTIONS ON ROBOT FACE
-// ════════════════════════════════════════════════════════
-// Call this once after DOM is ready; attaches pointer events to the robot SVG.
-function initTouchReactions() {
-  const svg = document.querySelector('#robotFace, svg.robot-face, svg');
-  if (!svg) return;
+// Suppress motion reactions for the entire duration of any hardware action
+const _origHardwareActiveSetter = Object.getOwnPropertyDescriptor(window, 'hardwareActive');
+// (hardwareActive is a plain var — we gate on it directly in the handlers above)
 
-  // Map touch zones (rough bounding boxes in SVG coordinate space) to emotions
-  // SVG viewBox assumed ~300×230 based on the eye coordinates in the code.
-  // Zones: top-of-head, left-eye, right-eye, nose/center, mouth, chin
-  const TOUCH_REACTIONS = [
-    { name: 'head-pat',    yMin: 0,   yMax: 55,  xMin: 50,  xMax: 250, emotion: 'loving',    reply: 'Pat pat! 💙' },
-    { name: 'left-eye',   yMin: 60,  yMax: 115, xMin: 30,  xMax: 100, emotion: 'shy',       reply: 'Hey! 👀'    },
-    { name: 'right-eye',  yMin: 60,  yMax: 115, xMin: 200, xMax: 270, emotion: 'shy',       reply: 'Hey! 👀'    },
-    { name: 'nose',       yMin: 115, yMax: 150, xMin: 100, xMax: 200, emotion: 'surprised', reply: 'Boop! 👃'   },
-    { name: 'mouth',      yMin: 150, yMax: 185, xMin: 90,  xMax: 210, emotion: 'happy',     reply: 'Hehe! 😄'   },
-    { name: 'chin',       yMin: 185, yMax: 230, xMin: 60,  xMax: 240, emotion: 'curious',   reply: 'Hmm? 🤔'    },
-  ];
-
-  svg.addEventListener('pointerdown', (e) => {
-    if (isSleeping) { wakeUp(); return; }
-
-    const rect = svg.getBoundingClientRect();
-    // Convert pointer to SVG-local coordinates
-    const scaleX = (svg.viewBox?.baseVal?.width  || 300) / rect.width;
-    const scaleY = (svg.viewBox?.baseVal?.height || 230) / rect.height;
-    const lx = (e.clientX - rect.left)  * scaleX;
-    const ly = (e.clientY - rect.top)   * scaleY;
-
-    for (const zone of TOUCH_REACTIONS) {
-      if (lx >= zone.xMin && lx <= zone.xMax && ly >= zone.yMin && ly <= zone.yMax) {
-        setEmotion(zone.emotion);
-        resetInactivity();
-        toast(zone.reply);
-        break;
-      }
-    }
-  });
-}
 
 // ════════════════════════════════════════════════════════
 // GEMINI AGENT
@@ -592,10 +562,9 @@ async function doChat(userText, imageDataUrl = null) {
   isBusy = true; document.getElementById('sendBtn').disabled = true; const typEl = showTyping();
   try {
     const { reply, emotion, toolCalls } = await callGemini(userText, imageDataUrl); removeTyping(typEl);
-    // ── Action chips removed: no longer passing toolCalls names to appendMsg ──
-    appendMsg('bot', reply); setEmotion(emotion); speak(reply);
+    appendMsg('bot', reply, toolCalls.map(t => t.name)); setEmotion(emotion); speak(reply);
     addToHistory('user', userText, imageDataUrl); addToHistory('model', reply); await executeTools(toolCalls);
-  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
+  } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
 }
 function addToHistory(role, text, imageBase64 = null) { chatHistory.push({ role, text, imageBase64 }); if (chatHistory.length > MAX_HISTORY) chatHistory.splice(0, chatHistory.length - MAX_HISTORY); try { sessionStorage.setItem('petro_history', JSON.stringify(chatHistory.map(m => ({...m, imageBase64: null})))); } catch {} updateMemoryPill(); }
 function loadHistory() { try { const saved = sessionStorage.getItem('petro_history'); if (saved) chatHistory = JSON.parse(saved); } catch {} }
@@ -627,6 +596,7 @@ function speak(text) {
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
   utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
   
+  // Detect Hindi logic
   const isHindi = /[\u0900-\u097F]/.test(clean);
   const voices = synth.getVoices();
   let pref;
@@ -697,6 +667,7 @@ function setEmotion(name, force = false) {
   if (em.browSlant !== 0) { eyeEls.lBrow.setAttribute('y1', 35 - em.browSlant); eyeEls.lBrow.setAttribute('y2', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y1', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y2', 35 - em.browSlant); } else { eyeEls.lBrow.setAttribute('y1', 35); eyeEls.lBrow.setAttribute('y2', 35); eyeEls.rBrow.setAttribute('y1', 35); eyeEls.rBrow.setAttribute('y2', 35); }
   document.getElementById('tearGroup').style.opacity = em.tears ? '1' : '0';
   if (!ttsActive) applyMouthForEmotion(name);
+  updateMiniPetro(name); // keep mini petro face in sync
 }
 
 function applyMouthForEmotion(name) { const em = emotions[name] || emotions.neutral; setMouthPath(em.mouthType, em.mouthOpen); document.getElementById('mouthRim').setAttribute('stroke', em.color); }
@@ -720,6 +691,7 @@ function resetInactivity() {
 function scheduleIdleMove() {
   idleMoveTimer = setTimeout(() => {
     if (!isSleeping && !isBusy && bleDevice && !isVideoPlaying) {
+       // Occasional physical wander vs smaller moves
        if (Math.random() > 0.85) {
            doWander(); 
        } else {
@@ -738,15 +710,7 @@ function scheduleIdleMove() {
 
 ['click','keydown','touchstart'].forEach(e => document.addEventListener(e, resetInactivity, {passive:true}));
 
-// ── appendMsg: action chips removed ──
-function appendMsg(role, text) { 
-  const c = document.getElementById('messages'), el = document.createElement('div'); 
-  el.className = `msg ${role}`; 
-  const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : 'petRO 🤖'; 
-  const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; 
-  el.append(lbl, bub); 
-  c.append(el); c.scrollTop = c.scrollHeight; 
-}
+function appendMsg(role, text, actions = []) { const c = document.getElementById('messages'), el = document.createElement('div'); el.className = `msg ${role}`; const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = role === 'user' ? 'You' : 'petRO 🤖'; const bub = document.createElement('div'); bub.className = 'msg-bubble'; bub.textContent = text; el.append(lbl, bub); if (actions?.length) { const chip = document.createElement('div'); chip.className = 'actions-chip'; chip.textContent = '⚡ ' + actions.join(' · '); el.append(chip); } c.append(el); c.scrollTop = c.scrollHeight; }
 function showTyping() { const c=document.getElementById('messages'),el=document.createElement('div'); el.className='msg bot'; el.innerHTML=`<div class="msg-label">petRO 🤖</div><div class="typing-wrap"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`; c.append(el); c.scrollTop=c.scrollHeight; return el; }
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
@@ -858,8 +822,139 @@ function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
 // ════════════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// FACE TOUCH REACTIONS
+// ════════════════════════════════════════════════════════
+const TOUCH_REACTIONS = [
+  { zone: 'top',    emotion: 'surprised', msg: '👆 Hey, watch the head!' },
+  { zone: 'left',   emotion: 'shy',       msg: '😊 Hehe, tickles!' },
+  { zone: 'right',  emotion: 'shy',       msg: '😊 That tickles!' },
+  { zone: 'center', emotion: 'loving',    msg: '💕 Aww, thanks!' },
+  { zone: 'bottom', emotion: 'happy',     msg: '😄 Chin scratch!' },
+];
+
+const SWIPE_REACTIONS = [
+  { dir: 'left',  emotion: 'surprised', msg: '😲 Whoa, left swipe!' },
+  { dir: 'right', emotion: 'excited',   msg: '✨ Right on!' },
+  { dir: 'up',    emotion: 'curious',   msg: '🤔 Looking up?' },
+  { dir: 'down',  emotion: 'sad',       msg: '😔 Down? Aww…' },
+];
+
+function initFaceTouch() {
+  const face = document.getElementById('faceScreen');
+  if (!face) return;
+
+  // Tap reaction
+  face.addEventListener('pointerdown', (e) => {
+    if (isBusy) return;
+    const rect = face.getBoundingClientRect();
+    const rx = (e.clientX - rect.left) / rect.width;  // 0..1
+    const ry = (e.clientY - rect.top)  / rect.height; // 0..1
+
+    let zone = 'center';
+    if (ry < 0.3)       zone = 'top';
+    else if (ry > 0.7)  zone = 'bottom';
+    else if (rx < 0.33) zone = 'left';
+    else if (rx > 0.67) zone = 'right';
+
+    const r = TOUCH_REACTIONS.find(t => t.zone === zone) || TOUCH_REACTIONS[4];
+    setEmotion(r.emotion);
+    toast(r.msg);
+    // Ripple effect
+    spawnRipple(e.clientX, e.clientY, face);
+  }, { passive: true });
+
+  // Swipe reaction
+  let swipeStart = null;
+  face.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    swipeStart = { x: t.clientX, y: t.clientY, ts: Date.now() };
+  }, { passive: true });
+  face.addEventListener('touchend', (e) => {
+    if (!swipeStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipeStart.x;
+    const dy = t.clientY - swipeStart.y;
+    const dt = Date.now() - swipeStart.ts;
+    swipeStart = null;
+    if (dt > 400) return; // too slow — not a swipe
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < 30 && ady < 30) return; // too short — it's a tap, handled above
+    let dir;
+    if (adx > ady) dir = dx > 0 ? 'right' : 'left';
+    else            dir = dy > 0 ? 'down'  : 'up';
+    const r = SWIPE_REACTIONS.find(s => s.dir === dir);
+    if (r) { setEmotion(r.emotion); toast(r.msg); }
+  }, { passive: true });
+}
+
+function spawnRipple(cx, cy, parent) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;left:${cx}px;top:${cy}px;width:0;height:0;border-radius:50%;
+    background:radial-gradient(circle,var(--theme-color) 0%,transparent 70%);
+    transform:translate(-50%,-50%);pointer-events:none;z-index:9999;
+    animation:ripple-grow 0.55s ease-out forwards;`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 600);
+}
+
+// ════════════════════════════════════════════════════════
+// MINI PETRO (video overlay face — synced to main face)
+// ════════════════════════════════════════════════════════
+const MINI_MOOD_LABELS = {
+  neutral:'😐 Chilling', happy:'😄 Happy!', excited:'🤩 Hyped!', sad:'😢 Sad…',
+  angry:'😠 Grr!', curious:'🤔 Curious', focused:'🎯 Focused', loving:'💕 Loving it!',
+  shy:'😊 Shy~', surprised:'😲 Whoa!', dizzy:'😵 Dizzy', afraid:'😨 Scared!', sleeping:'😴 Zzz…'
+};
+
+function _applyMiniPetroFace(irisL, lidL, irisR, lidR, mouth, em, emotionName) {
+  if (!irisL) return;
+  const eyeColor = (emotionName === 'neutral') ? 'var(--theme-color)' : em.color;
+  const r = Math.max(6, Math.round(em.irisR * 0.22));
+  irisL.setAttribute('r', r); irisL.style.fill = eyeColor;
+  irisR.setAttribute('r', r); irisR.style.fill = eyeColor;
+  // Lid: slide down to cover eye when sleeping/shy/sad
+  const lidY = em.lidTopY > 0 ? Math.min(30, 10 + em.lidTopY * 0.4) : 10;
+  lidL.setAttribute('y', lidY); lidR.setAttribute('y', lidY);
+  // Mouth
+  let d;
+  switch(em.mouthType) {
+    case 'smile':  d = 'M 30 62 Q 50 72 70 62'; break;
+    case 'laugh':  d = 'M 27 59 Q 50 76 73 59'; break;
+    case 'frown':  d = 'M 30 68 Q 50 58 70 68'; break;
+    case 'flat':   d = 'M 32 65 L 68 65';        break;
+    case 'sleep':  d = 'M 38 65 Q 50 65 62 65';  break;
+    case 'wiggle': d = 'M 28 65 Q 38 57 50 65 T 72 65'; break;
+    default:       d = 'M 35 63 Q 50 70 65 63';  break;
+  }
+  mouth.setAttribute('d', d);
+  mouth.setAttribute('stroke', eyeColor);
+}
+
+function updateMiniPetro(emotionName) {
+  const em = emotions[emotionName] || emotions.neutral;
+  // dpad-area mini petro (shown when video is playing, left sidebar)
+  _applyMiniPetroFace(
+    document.getElementById('mini-ml-iris'), document.getElementById('mini-ml-lid'),
+    document.getElementById('mini-mr-iris'), document.getElementById('mini-mr-lid'),
+    document.getElementById('mini-mouth'), em, emotionName
+  );
+  const statusEl = document.getElementById('miniPetroStatus');
+  if (statusEl) statusEl.textContent = MINI_MOOD_LABELS[emotionName] || '😐 Chilling';
+
+  // yt side panel mini petro
+  _applyMiniPetroFace(
+    document.getElementById('yt-ml-iris'), document.getElementById('yt-ml-lid'),
+    document.getElementById('yt-mr-iris'), document.getElementById('yt-mr-lid'),
+    document.getElementById('yt-mouth'), em, emotionName
+  );
+  const moodEl = document.getElementById('ytSideMood');
+  if (moodEl) moodEl.textContent = MINI_MOOD_LABELS[emotionName] || '😐 Chilling';
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   initEyes(); resetInactivity(); initCamera(); loadHistory(); loadPersonalization(); updateKeyBadge(); updateMemoryPill(); applyMouthForEmotion('neutral');
-  initTouchReactions(); // ← touch reactions on robot face
   if (synth) { synth.getVoices(); synth.addEventListener('voiceschanged', () => synth.getVoices()); }
+  initFaceTouch();
+  updateGyroBtnState();
 });
