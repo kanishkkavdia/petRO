@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
-const WAKE_WORDS  = ['ok petro','okay petro','hey petro','petro'];
+const WAKE_WORDS  = ['ok petro','okay petro','hey petro'];
 const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
@@ -112,6 +112,7 @@ function trackUsage(inTokens, outTokens) {
 function updateUsageUI() {
     const el = document.getElementById('usageBox'); if (!el) return;
     let usage = JSON.parse(localStorage.getItem('petro_usage') || '{"in":0,"out":0,"req":0}');
+    // Est cost based on standard Gemini Flash pricing (~$0.075/1M in, ~$0.30/1M out)
     const cost = ((usage.in / 1000000) * 0.075) + ((usage.out / 1000000) * 0.30);
     el.innerHTML = `Requests: <b>${usage.req}</b><br>Tokens: <b>${usage.in.toLocaleString()}</b> In / <b>${usage.out.toLocaleString()}</b> Out<br>Est. Cost: <b>$${cost.toFixed(5)}</b>`;
 }
@@ -123,20 +124,27 @@ function clearUsage() {
 // ════════════════════════════════════════════════════════
 // BLUETOOTH
 // ════════════════════════════════════════════════════════
+
+// --- Reconnect state (declared before use) ---
 let bleIntentionalDisconnect = false;
 let bleReconnectTimer = null;
 let bleReconnectAttempts = 0;
 const BLE_MAX_RECONNECT = 8;
 
+// --- Mutex queue: only ONE write in-flight at a time ---
+// Each call waits for the previous to fully resolve before starting.
 let _bleQueueTail = Promise.resolve();
 function bleSend(cmd) {
+  // Chain onto the tail; capture the new tail so next call waits on THIS one
   const next = _bleQueueTail.then(() => _bleWrite(cmd));
-  _bleQueueTail = next.catch(() => {});
-  return next;
+  _bleQueueTail = next.catch(() => {}); // prevent unhandled rejection on the shared tail
+  return next; // caller gets a promise that resolves/rejects for THIS write only
 }
 
 async function _bleWrite(cmd) {
   if (!bleDevice || bleIntentionalDisconnect) return;
+
+  // If GATT layer dropped, reconnect before writing
   if (!bleDevice.gatt.connected) {
     try {
       const server  = await bleDevice.gatt.connect();
@@ -145,13 +153,15 @@ async function _bleWrite(cmd) {
       _setBLEConnected(true);
     } catch(e) {
       _setBLEConnected(false);
-      throw e;
+      throw e; // propagate so caller knows the write didn't happen
     }
   }
+
   if (!bleCmdChar) return;
   try {
     await bleCmdChar.writeValueWithoutResponse(new TextEncoder().encode(cmd));
   } catch(e) {
+    // write failed — GATT probably dropped right now; let onBleDisconnect handle it
     _setBLEConnected(false);
     bleCmdChar = null;
     throw e;
@@ -185,10 +195,11 @@ function disconnectBLE() {
 }
 
 function onBleDisconnect() {
-  if (bleIntentionalDisconnect) return;
+  if (bleIntentionalDisconnect) return; // user pressed disconnect — don't reconnect
   _setBLEConnected(false);
   bleCmdChar = null;
   updateBleInfoBox();
+  // Start back-off reconnect
   bleReconnectAttempts = 0;
   _scheduleReconnect();
 }
@@ -196,11 +207,11 @@ function onBleDisconnect() {
 function _scheduleReconnect() {
   if (bleIntentionalDisconnect || !bleDevice) return;
   if (bleReconnectAttempts >= BLE_MAX_RECONNECT) {
-    toast('❌ Could not reconnect. Tap BLE to retry.');
+    toast('❌ Could not reconnect after ' + BLE_MAX_RECONNECT + ' tries. Tap BLE to retry.');
     return;
   }
   bleReconnectAttempts++;
-  const delay = Math.min(500 * bleReconnectAttempts, 6000);
+  const delay = Math.min(500 * bleReconnectAttempts, 6000); // 0.5s, 1s, 1.5s … max 6s
   toast(`⚠️ Disconnected. Reconnecting (${bleReconnectAttempts}/${BLE_MAX_RECONNECT})…`);
   clearTimeout(bleReconnectTimer);
   bleReconnectTimer = setTimeout(_attemptReconnect, delay);
@@ -217,10 +228,11 @@ async function _attemptReconnect() {
     setBLE(true); toast('✅ Reconnected!'); updateBleInfoBox();
   } catch(e) {
     _setBLEConnected(false);
-    _scheduleReconnect();
+    _scheduleReconnect(); // try again with increased delay
   }
 }
 
+// Sets the UI+flag WITHOUT triggering side-effects that cause more bleSend calls
 function _setBLEConnected(val) {
   bleConnected = val;
   const b = document.getElementById('bleBtn');
@@ -231,7 +243,7 @@ function setBLE(s) {
   const b = document.getElementById('bleBtn');
   if (s === null) { b.className='badge ble-spin'; b.textContent='⟳ BLE…'; bleConnected = false; }
   else if (s)     { b.className='badge ble-on';   b.textContent='🟢 BLE'; bleConnected = true; }
-  else            { b.className='badge ble-off';  b.textContent='⚫ BLE'; bleConnected = false; }
+  else            { b.className='badge ble-off';   b.textContent='⚫ BLE'; bleConnected = false; }
 }
 function updateBleInfoBox() { const el = document.getElementById('bleInfoBox'); if (!el) return; el.innerHTML = (bleConnected && bleDevice) ? `Status: <span style="color:var(--green)">Connected ✓</span>` : `Status: <span style="color:var(--red)">Not connected</span>`; }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -248,26 +260,13 @@ async function doAction(action) {
   resetInactivity();
   switch(action) { case 'nod': await bleSend('N'); await sleep(2000); break; case 'dance': await doDance(); break; case 'wander': await doWander(); break; }
 }
-
-// Updated doDance() to show expressions while performing routines
 async function doDance() { 
-  toast('💃 Dancing!'); 
+  toast('💃 Dancing!'); setEmotion('excited'); 
   hardwareActive = true; clearTimeout(hwTimeout);
-  
-  const danceEmotions = ['excited', 'happy', 'surprised', 'loving'];
-  let emIndex = 0;
-  
-  for (const [cmd, ms] of DANCE_STEPS) { 
-    setEmotion(danceEmotions[emIndex % danceEmotions.length]);
-    emIndex++;
-    await bleSend(cmd); 
-    if (ms > 0) await sleep(ms); 
-  } 
+  for (const [cmd, ms] of DANCE_STEPS) { await bleSend(cmd); if (ms > 0) await sleep(ms); } 
   hardwareActive = false;
-  setEmotion('neutral');
   toast('🎉 Done!'); 
 }
-
 async function doWander() { 
   toast('🗺 Wandering!'); setEmotion('focused'); 
   hardwareActive = true; clearTimeout(hwTimeout);
@@ -279,8 +278,11 @@ async function doWander() {
 // ════════════════════════════════════════════════════════
 // MOTION SENSORS
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// MOTION SENSORS
+// ════════════════════════════════════════════════════════
 let lastAccel = 0, motionSensorsbound = false;
-let motionCooldown = false;
+let motionCooldown = false; // debounce so robot's own vibrations don't re-trigger
 
 function enableMotionSensors() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -312,14 +314,17 @@ function updateGyroBtnState() {
 }
 
 function bindSensors() {
-  if (motionSensorsbound) return; 
+  if (motionSensorsbound) return; // only bind once
   motionSensorsbound = true;
   window.addEventListener('devicemotion', (e) => {
+    // Skip if: disabled, sleeping, robot is actively moving/doing something, or in cooldown
     if (!motionEnabled || isSleeping || hardwareActive || isBusy || motionCooldown) return;
     let acc = e.accelerationIncludingGravity; if (!acc) return;
     let total = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z);
+    // Raised threshold (was 25) — filters out robot motor vibrations reaching the phone
     if (Math.abs(total - lastAccel) > 18) {
       setEmotion('dizzy'); resetInactivity();
+      // Cooldown prevents motor-vibration bursts from spamming emotions
       motionCooldown = true;
       setTimeout(() => { motionCooldown = false; }, 1500);
     }
@@ -334,6 +339,11 @@ function bindSensors() {
     }
   });
 }
+
+// Suppress motion reactions for the entire duration of any hardware action
+const _origHardwareActiveSetter = Object.getOwnPropertyDescriptor(window, 'hardwareActive');
+// (hardwareActive is a plain var — we gate on it directly in the handlers above)
+
 
 // ════════════════════════════════════════════════════════
 // GEMINI AGENT
@@ -394,8 +404,6 @@ async function callGemini(userText, imageDataUrl = null) {
   for (const part of parts) { if (part.text) replyText = part.text; if (part.functionCall) toolCalls.push({ name: part.functionCall.name, args: part.functionCall.args || {} }); }
 
   const emotionMatch = replyText.match(/\[emotion:(\w+)\]/i); const emotion = emotionMatch ? emotionMatch[1].toLowerCase() : detectEmotion(toolCalls, replyText);
-  
-  // Clean text of programmatic tags before rendering to clear repetitiveness
   replyText = replyText.replace(/\[emotion:\w+\]/gi, '').trim();
 
   return { reply: replyText, emotion, toolCalls };
@@ -422,14 +430,8 @@ function startGroove() {
   if (grooveTimer || !bleDevice) return;
   let step = 0;
   const grooveMoves = ['V', '1', '2', 'U', '7', '8', '3', '4']; 
-  const grooveEmotions = ['excited', 'happy', 'neutral', 'curious'];
-  
   grooveTimer = setInterval(() => {
-     if (!isMoving && !isBusy && bleConnected) { 
-        setEmotion(grooveEmotions[step % grooveEmotions.length]);
-        bleSend(grooveMoves[step % grooveMoves.length]); 
-        step++; 
-     }
+     if (!isMoving && !isBusy && !hardwareActive && bleConnected) { bleSend(grooveMoves[step % grooveMoves.length]); step++; }
   }, 1800);
 }
 
@@ -445,11 +447,7 @@ async function openYouTube(query, isEntertainment = false) {
       
       document.getElementById('ytContainer').style.display = 'flex';
       document.getElementById('normalControls').style.display = 'none';
-      
-      // Ensure element layout turns visible immediately
-      const miniPetro = document.getElementById('miniPetroArea');
-      miniPetro.style.display = 'flex';
-      miniPetro.style.opacity = '1';
+      document.getElementById('miniPetroArea').style.display = 'flex';
       
       if (isYtApiReady) {
           if (!ytPlayer) {
@@ -462,10 +460,10 @@ async function openYouTube(query, isEntertainment = false) {
               ytPlayer.loadVideoById(vid);
           }
       } else {
-          document.getElementById('ytPlayerDiv').innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
+         document.getElementById('ytPlayerDiv').innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" style="width:100%;height:100%;border:none;" allow="autoplay" allowfullscreen></iframe>`;
       }
       
-      appendMsg('bot', `Now Playing. View here if stuck: https://youtube.com/watch?v=${vid}`);
+      appendMsg('bot', `Now Playing. If video gets stuck, watch here: https://youtube.com/watch?v=${vid}`);
       
       isVideoPlaying = true;
       if (alwaysOnMic) { stopAllRecog(); micSuspendedForVideo = true; toast('🎤 Mic paused for media'); }
@@ -491,14 +489,10 @@ function closeYouTube() {
   }
   
   document.getElementById('normalControls').style.display = 'flex';
-  
-  const miniPetro = document.getElementById('miniPetroArea');
-  miniPetro.style.display = 'none';
-  miniPetro.style.opacity = '0';
+  document.getElementById('miniPetroArea').style.display = 'none';
   
   isVideoPlaying = false;
   stopGroove();
-  setEmotion('neutral');
   
   if (micSuspendedForVideo) {
       alwaysOnMic = true; startBgListen(); updateMicBadge('wake'); 
@@ -568,12 +562,8 @@ async function doChat(userText, imageDataUrl = null) {
   isBusy = true; document.getElementById('sendBtn').disabled = true; const typEl = showTyping();
   try {
     const { reply, emotion, toolCalls } = await callGemini(userText, imageDataUrl); removeTyping(typEl);
-    
-    // Clean reply text of bracketed emotion tokens or repetitive markdown tags
-    const displayReply = reply.replace(/\[emotion:\w+\]/gi, '').trim();
-    
-    appendMsg('bot', displayReply, toolCalls.map(t => t.name)); setEmotion(emotion); speak(displayReply);
-    addToHistory('user', userText, imageDataUrl); addToHistory('model', displayReply); await executeTools(toolCalls);
+    appendMsg('bot', reply, toolCalls.map(t => t.name)); setEmotion(emotion); speak(reply);
+    addToHistory('user', userText, imageDataUrl); addToHistory('model', reply); await executeTools(toolCalls);
   } catch(e) { removeTyping(typEl); appendMsg('bot', `❌ ${e.message}`, []); setEmotion('sad'); speak('Oops! Error.'); } finally { isBusy = false; document.getElementById('sendBtn').disabled = false; }
 }
 function addToHistory(role, text, imageBase64 = null) { chatHistory.push({ role, text, imageBase64 }); if (chatHistory.length > MAX_HISTORY) chatHistory.splice(0, chatHistory.length - MAX_HISTORY); try { sessionStorage.setItem('petro_history', JSON.stringify(chatHistory.map(m => ({...m, imageBase64: null})))); } catch {} updateMemoryPill(); }
@@ -606,6 +596,7 @@ function speak(text) {
   if (theme === 'terminator') { pitch = 0.4; rate = 0.9; } else if (theme === 'transformer') { pitch = 0.1; rate = 0.85; } else if (theme === 'monkey') { pitch = 1.5; rate = 1.25; } else if (theme === 'dog') { pitch = 1.3; rate = 1.15; } else if (theme === 'starwars') { pitch = 1.8; rate = 1.4; }
   utt.pitch = pitch; utt.rate = rate; utt.volume = 1;
   
+  // Detect Hindi logic
   const isHindi = /[\u0900-\u097F]/.test(clean);
   const voices = synth.getVoices();
   let pref;
@@ -666,42 +657,29 @@ function setEmotion(name, force = false) {
   clearTimeout(emotionResetTimer);
   if (name !== 'neutral' && name !== 'sleeping') emotionResetTimer = setTimeout(() => setEmotion('neutral'), 5000);
 
-  if (bleConnected && !force && name !== 'sleeping') {
+  if (bleConnected && !force && name !== 'sleeping' && !hardwareActive) {
       const hwMap = { happy:'H', sad:'O', angry:'G', focused:'N', excited:'D', afraid:'W', dizzy:'X', curious:'X', surprised:'H', shy:'N', loving:'H' };
       if (hwMap[name]) bleSend(hwMap[name]);
   }
 
-  for (const s of ['l','r']) { 
-    if (eyeEls[`${s}Iris`]) {
-      eyeEls[`${s}Iris`].setAttribute('rx', em.irisR); eyeEls[`${s}Iris`].setAttribute('ry', em.irisR); 
-      eyeEls[`${s}Iris`].style.fill = (name==='neutral') ? 'url(#ig1)' : em.color;
-    }
-    if (eyeEls[`${s}Pupil`]) {
-      eyeEls[`${s}Pupil`].setAttribute('rx', em.pupilR); eyeEls[`${s}Pupil`].setAttribute('ry', em.pupilR);
-    }
-    if (eyeEls[`${s}LidTop`]) eyeEls[`${s}LidTop`].setAttribute('y', em.lidTopY); 
-    if (eyeEls[`${s}LidBot`]) eyeEls[`${s}LidBot`].setAttribute('y', em.lidBotY); 
-    if (eyeEls[`${s}Rim`]) eyeEls[`${s}Rim`].setAttribute('stroke', em.color); 
-  }
-  if (eyeEls.lBrow && eyeEls.rBrow) {
-    eyeEls.lBrow.setAttribute('stroke-width', em.browW); eyeEls.rBrow.setAttribute('stroke-width', em.browW); eyeEls.lBrow.setAttribute('stroke', em.color); eyeEls.rBrow.setAttribute('stroke', em.color);
-    if (em.browSlant !== 0) { eyeEls.lBrow.setAttribute('y1', 35 - em.browSlant); eyeEls.lBrow.setAttribute('y2', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y1', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y2', 35 - em.browSlant); } else { eyeEls.lBrow.setAttribute('y1', 35); eyeEls.lBrow.setAttribute('y2', 35); eyeEls.rBrow.setAttribute('y1', 35); eyeEls.rBrow.setAttribute('y2', 35); }
-  }
-  const tg = document.getElementById('tearGroup'); if (tg) tg.style.opacity = em.tears ? '1' : '0';
+  for (const s of ['l','r']) { eyeEls[`${s}Iris`].setAttribute('rx', em.irisR); eyeEls[`${s}Iris`].setAttribute('ry', em.irisR); eyeEls[`${s}Pupil`].setAttribute('rx', em.pupilR); eyeEls[`${s}Pupil`].setAttribute('ry', em.pupilR); eyeEls[`${s}Iris`].style.fill = (name==='neutral') ? 'url(#ig1)' : em.color; eyeEls[`${s}LidTop`].setAttribute('y', em.lidTopY); eyeEls[`${s}LidBot`].setAttribute('y', em.lidBotY); eyeEls[`${s}Rim`].setAttribute('stroke', em.color); }
+  eyeEls.lBrow.setAttribute('stroke-width', em.browW); eyeEls.rBrow.setAttribute('stroke-width', em.browW); eyeEls.lBrow.setAttribute('stroke', em.color); eyeEls.rBrow.setAttribute('stroke', em.color);
+  if (em.browSlant !== 0) { eyeEls.lBrow.setAttribute('y1', 35 - em.browSlant); eyeEls.lBrow.setAttribute('y2', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y1', 35 + em.browSlant); eyeEls.rBrow.setAttribute('y2', 35 - em.browSlant); } else { eyeEls.lBrow.setAttribute('y1', 35); eyeEls.lBrow.setAttribute('y2', 35); eyeEls.rBrow.setAttribute('y1', 35); eyeEls.rBrow.setAttribute('y2', 35); }
+  document.getElementById('tearGroup').style.opacity = em.tears ? '1' : '0';
   if (!ttsActive) applyMouthForEmotion(name);
-  updateMiniPetro(name);
+  updateMiniPetro(name); // keep mini petro face in sync
 }
 
-function applyMouthForEmotion(name) { const em = emotions[name] || emotions.neutral; setMouthPath(em.mouthType, em.mouthOpen); const mr = document.getElementById('mouthRim'); if (mr) mr.setAttribute('stroke', em.color); }
-function setMouthPath(type, open = 0) { const mp = document.getElementById('mouthPath'); if (!mp) return; let d = ''; switch(type) { case 'smile': d = `M 105 165 Q 150 ${178+open} 195 165`; break; case 'laugh': d = `M 105 162 Q 150 ${185+open} 195 162`; break; case 'frown': d = `M 105 174 Q 150 ${162-open} 195 174`; break; case 'flat': d = `M 110 169 L 190 169`; break; case 'small': d = `M 125 168 Q 150 ${174+open} 175 168`; break; case 'sleep': d = `M 125 168 Q 150 168 175 168`; break; case 'wiggle': d = `M 110 169 Q 130 159 150 169 T 190 169`; break; default: d = `M 105 169 Q 150 ${178+open} 195 169`; } mp.setAttribute('d', d); if (type === 'laugh') { mp.setAttribute('fill','rgba(0,0,0,0.5)'); mp.setAttribute('stroke-width','2.5'); } else { mp.setAttribute('fill','none'); mp.setAttribute('stroke-width','3.5'); } }
+function applyMouthForEmotion(name) { const em = emotions[name] || emotions.neutral; setMouthPath(em.mouthType, em.mouthOpen); document.getElementById('mouthRim').setAttribute('stroke', em.color); }
+function setMouthPath(type, open = 0) { const mp = document.getElementById('mouthPath'); let d = ''; switch(type) { case 'smile': d = `M 105 165 Q 150 ${178+open} 195 165`; break; case 'laugh': d = `M 105 162 Q 150 ${185+open} 195 162`; break; case 'frown': d = `M 105 174 Q 150 ${162-open} 195 174`; break; case 'flat': d = `M 110 169 L 190 169`; break; case 'small': d = `M 125 168 Q 150 ${174+open} 175 168`; break; case 'sleep': d = `M 125 168 Q 150 168 175 168`; break; case 'wiggle': d = `M 110 169 Q 130 159 150 169 T 190 169`; break; default: d = `M 105 169 Q 150 ${178+open} 195 169`; } mp.setAttribute('d', d); if (type === 'laugh') { mp.setAttribute('fill','rgba(0,0,0,0.5)'); mp.setAttribute('stroke-width','2.5'); } else { mp.setAttribute('fill','none'); mp.setAttribute('stroke-width','3.5'); } }
 
 // ════════════════════════════════════════════════════════
 // SLEEP / WAKE / IDLE / MIC
 // ════════════════════════════════════════════════════════
 function goToSleep() { if(isSleeping)return; isSleeping=true; setEmotion('sleeping',true); stopTTS(); startZZZ(); }
 function wakeUp() { if(!isSleeping)return; isSleeping=false; stopZZZ(); setEmotion('neutral',true); resetInactivity(); }
-function startZZZ() { const g = document.getElementById('sleepZZZ'), z1 = document.getElementById('z1'), z2 = document.getElementById('z2'), z3 = document.getElementById('z3'); if (!g) return; g.style.opacity = '1'; let t = 0; (function f() { t+=0.03; const b=Math.sin(t)*0.3+0.7; z1.setAttribute('opacity',b); z2.setAttribute('opacity',b*0.7); z3.setAttribute('opacity',b*0.45); z1.setAttribute('y',40-Math.sin(t*0.7)*7); z2.setAttribute('y',24-Math.sin(t*0.7+.5)*7); z3.setAttribute('y',6-Math.sin(t*0.7+1)*7); zzzAnim=requestAnimationFrame(f); })(); }
-function stopZZZ() { if(zzzAnim)cancelAnimationFrame(zzzAnim); const g = document.getElementById('sleepZZZ'); if (g) g.style.opacity = '0'; }
+function startZZZ() { const g = document.getElementById('sleepZZZ'), z1 = document.getElementById('z1'), z2 = document.getElementById('z2'), z3 = document.getElementById('z3'); g.style.opacity = '1'; let t = 0; (function f() { t+=0.03; const b=Math.sin(t)*0.3+0.7; z1.setAttribute('opacity',b); z2.setAttribute('opacity',b*0.7); z3.setAttribute('opacity',b*0.45); z1.setAttribute('y',40-Math.sin(t*0.7)*7); z2.setAttribute('y',24-Math.sin(t*0.7+.5)*7); z3.setAttribute('y',6-Math.sin(t*0.7+1)*7); zzzAnim=requestAnimationFrame(f); })(); }
+function stopZZZ() { if(zzzAnim)cancelAnimationFrame(zzzAnim); document.getElementById('sleepZZZ').style.opacity = '0'; }
 
 function resetInactivity() { 
   if(isSleeping) wakeUp(); 
@@ -713,6 +691,7 @@ function resetInactivity() {
 function scheduleIdleMove() {
   idleMoveTimer = setTimeout(() => {
     if (!isSleeping && !isBusy && bleDevice && !isVideoPlaying) {
+       // Occasional physical wander vs smaller moves
        if (Math.random() > 0.85) {
            doWander(); 
        } else {
@@ -736,11 +715,11 @@ function showTyping() { const c=document.getElementById('messages'),el=document.
 function removeTyping(el) { el?.remove(); }
 function toast(msg) { const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'), 3400); }
 
+// ── EARS VISUAL OVERLAY FOR MIC ──
 function toggleThemeEars(show) {
   const tId = document.getElementById('themeSelect').value || 'default';
   const group = document.getElementById('earsGroup');
   const statusTxt = document.getElementById('listeningStatus');
-  if (!group || !statusTxt) return;
   
   if (!show) { 
       group.style.opacity = '0'; 
@@ -761,7 +740,7 @@ function toggleThemeEars(show) {
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 function toggleAlwaysOnMic() { if(!SR){toast('⚠️ Speech API not supported');return;} alwaysOnMic=!alwaysOnMic; if(alwaysOnMic){startBgListen(); updateMicBadge('wake');} else{stopAllRecog(); updateMicBadge('off');} }
-function updateMicBadge(state) { const b=document.getElementById('micBadge'); if(!b) return; if(state==='off'){b.className='badge mic-off'; b.textContent='🎤 OFF';} if(state==='wake'){b.className='badge mic-wake'; b.textContent='👂 WAKE';} if(state==='cmd'){b.className='badge mic-on'; b.textContent='🔴 REC';} }
+function updateMicBadge(state) { const b=document.getElementById('micBadge'); if(state==='off'){b.className='badge mic-off'; b.textContent='🎤 OFF';} if(state==='wake'){b.className='badge mic-wake'; b.textContent='👂 WAKE';} if(state==='cmd'){b.className='badge mic-on'; b.textContent='🔴 REC';} }
 function stopAllRecog() { try{bgRecog?.abort();}catch{} try{cmdRecog?.abort();}catch{} bgRecog=null; cmdRecog=null; micState='off'; toggleThemeEars(false); }
 
 function startBgListen() { 
@@ -774,20 +753,21 @@ function wakeWordDetected() { if(micState==='cmd')return; try{bgRecog?.abort();}
 function listenForCommand() { 
     micState='cmd'; updateMicBadge('cmd'); 
     cmdRecog = new SR(); cmdRecog.continuous=false; cmdRecog.interimResults=true; 
-    const sub = document.getElementById('listeningStatus'); if (sub) sub.textContent = 'Listening...'; 
+    const sub = document.getElementById('listeningStatus'); sub.textContent = 'Listening...'; 
     cmdRecog.onresult = e => { 
         const last = e.results[e.results.length-1]; const t = last[0].transcript; 
         if(last.isFinal){ 
-            if (sub) sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; 
+            sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; 
             document.getElementById('userInput').value=t; appendMsg('user',t); doChat(t); 
             setTimeout(startBgListen,800); 
-        } else { if (sub) sub.textContent=t+'…'; } 
+        } else { sub.textContent=t+'…'; } 
     }; 
     cmdRecog.onerror = () => { hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400); }; 
     cmdRecog.onend = () => { if(micState==='cmd'){hideWakeOverlay(); micState='wake'; setTimeout(startBgListen,400);} }; 
     try{cmdRecog.start();}catch{hideWakeOverlay(); micState='wake'; startBgListen();} 
 }
 
+// ── FOLLOW UP WINDOW ──
 function startFollowUp() {
   if (!alwaysOnMic || isVideoPlaying) return;
   const dur = parseInt(document.getElementById('followUpSelect').value || '0', 10);
@@ -796,7 +776,7 @@ function startFollowUp() {
   followUpActive = true;
   showWakeOverlay();
   const sub = document.getElementById('listeningStatus');
-  if (sub) sub.textContent = 'Awaiting follow-up...';
+  sub.textContent = 'Awaiting follow-up...';
   
   micState = 'cmd'; 
   updateMicBadge('cmd'); 
@@ -810,9 +790,9 @@ function startFollowUp() {
       const last = e.results[e.results.length-1]; const t = last[0].transcript; 
       if(last.isFinal){ 
           clearTimeout(followUpTimeout); followUpActive = false;
-          if (sub) sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; 
+          sub.textContent=`"${t}"`; hideWakeOverlay(); micState='wake'; 
           document.getElementById('userInput').value=t; appendMsg('user',t); doChat(t); 
-      } else { if (sub) sub.textContent=t+'…'; } 
+      } else { sub.textContent=t+'…'; } 
   }; 
   
   cmdRecog.onerror = (e) => { 
@@ -838,6 +818,10 @@ function cancelWake() { try{cmdRecog?.abort();}catch{} hideWakeOverlay(); micSta
 function showWakeOverlay() { toggleThemeEars(true); updateMicBadge('cmd'); }
 function hideWakeOverlay() { toggleThemeEars(false); updateMicBadge('wake'); }
 
+
+// ════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════
 // FACE TOUCH REACTIONS
 // ════════════════════════════════════════════════════════
@@ -860,11 +844,12 @@ function initFaceTouch() {
   const face = document.getElementById('faceScreen');
   if (!face) return;
 
+  // Tap reaction
   face.addEventListener('pointerdown', (e) => {
     if (isBusy) return;
     const rect = face.getBoundingClientRect();
-    const rx = (e.clientX - rect.left) / rect.width;  
-    const ry = (e.clientY - rect.top)  / rect.height; 
+    const rx = (e.clientX - rect.left) / rect.width;  // 0..1
+    const ry = (e.clientY - rect.top)  / rect.height; // 0..1
 
     let zone = 'center';
     if (ry < 0.3)       zone = 'top';
@@ -875,9 +860,11 @@ function initFaceTouch() {
     const r = TOUCH_REACTIONS.find(t => t.zone === zone) || TOUCH_REACTIONS[4];
     setEmotion(r.emotion);
     toast(r.msg);
+    // Ripple effect
     spawnRipple(e.clientX, e.clientY, face);
   }, { passive: true });
 
+  // Swipe reaction
   let swipeStart = null;
   face.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
@@ -890,12 +877,12 @@ function initFaceTouch() {
     const dy = t.clientY - swipeStart.y;
     const dt = Date.now() - swipeStart.ts;
     swipeStart = null;
-    if (dt > 400) return; 
+    if (dt > 400) return; // too slow — not a swipe
     const adx = Math.abs(dx), ady = Math.abs(dy);
-    if (adx < 30 && ady < 30) return; 
+    if (adx < 30 && ady < 30) return; // too short — it's a tap, handled above
     let dir;
     if (adx > ady) dir = dx > 0 ? 'right' : 'left';
-    else             dir = dy > 0 ? 'down'  : 'up';
+    else            dir = dy > 0 ? 'down'  : 'up';
     const r = SWIPE_REACTIONS.find(s => s.dir === dir);
     if (r) { setEmotion(r.emotion); toast(r.msg); }
   }, { passive: true });
@@ -926,19 +913,19 @@ function _applyMiniPetroFace(irisL, lidL, irisR, lidR, mouth, em, emotionName) {
   const r = Math.max(6, Math.round(em.irisR * 0.22));
   irisL.setAttribute('r', r); irisL.style.fill = eyeColor;
   irisR.setAttribute('r', r); irisR.style.fill = eyeColor;
+  // Lid: slide down to cover eye when sleeping/shy/sad
   const lidY = em.lidTopY > 0 ? Math.min(30, 10 + em.lidTopY * 0.4) : 10;
-  if (lidL) lidL.setAttribute('y', lidY); 
-  if (lidR) lidR.setAttribute('y', lidY);
-  
+  lidL.setAttribute('y', lidY); lidR.setAttribute('y', lidY);
+  // Mouth
   let d;
   switch(em.mouthType) {
-    case 'smile':  d = 'M 35 65 Q 50 75 65 65'; break;
-    case 'laugh':  d = 'M 32 62 Q 50 78 68 62'; break;
-    case 'frown':  d = 'M 35 70 Q 50 60 65 70'; break;
-    case 'flat':   d = 'M 35 65 L 65 65';        break;
+    case 'smile':  d = 'M 30 62 Q 50 72 70 62'; break;
+    case 'laugh':  d = 'M 27 59 Q 50 76 73 59'; break;
+    case 'frown':  d = 'M 30 68 Q 50 58 70 68'; break;
+    case 'flat':   d = 'M 32 65 L 68 65';        break;
     case 'sleep':  d = 'M 38 65 Q 50 65 62 65';  break;
-    case 'wiggle': d = 'M 32 65 Q 40 58 50 65 T 68 65'; break;
-    default:       d = 'M 35 65 Q 50 72 65 65';  break;
+    case 'wiggle': d = 'M 28 65 Q 38 57 50 65 T 72 65'; break;
+    default:       d = 'M 35 63 Q 50 70 65 63';  break;
   }
   mouth.setAttribute('d', d);
   mouth.setAttribute('stroke', eyeColor);
@@ -946,6 +933,7 @@ function _applyMiniPetroFace(irisL, lidL, irisR, lidR, mouth, em, emotionName) {
 
 function updateMiniPetro(emotionName) {
   const em = emotions[emotionName] || emotions.neutral;
+  // dpad-area mini petro (shown when video is playing, left sidebar)
   _applyMiniPetroFace(
     document.getElementById('mini-ml-iris'), document.getElementById('mini-ml-lid'),
     document.getElementById('mini-mr-iris'), document.getElementById('mini-mr-lid'),
@@ -953,6 +941,15 @@ function updateMiniPetro(emotionName) {
   );
   const statusEl = document.getElementById('miniPetroStatus');
   if (statusEl) statusEl.textContent = MINI_MOOD_LABELS[emotionName] || '😐 Chilling';
+
+  // yt side panel mini petro
+  _applyMiniPetroFace(
+    document.getElementById('yt-ml-iris'), document.getElementById('yt-ml-lid'),
+    document.getElementById('yt-mr-iris'), document.getElementById('yt-mr-lid'),
+    document.getElementById('yt-mouth'), em, emotionName
+  );
+  const moodEl = document.getElementById('ytSideMood');
+  if (moodEl) moodEl.textContent = MINI_MOOD_LABELS[emotionName] || '😐 Chilling';
 }
 
 window.addEventListener('DOMContentLoaded', () => {
