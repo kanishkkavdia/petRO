@@ -133,6 +133,13 @@ function clearUsage() {
 // BLUETOOTH
 // ════════════════════════════════════════════════════════
 async function toggleBLE() {
+  // If reconnecting, cancel and allow fresh scan
+  if (bleReconnecting || bleReconnectAttempts > 0) {
+    bleReconnecting = false;
+    bleReconnectAttempts = BLE_RECONNECT_MAX; // stop further auto-retries
+    clearTimeout(bleReconnectTimer);
+    bleDevice = null; bleCmdChar = null; setBLE(false);
+  }
   if (bleConnected) { disconnectBLE(); return; }
   if (!navigator.bluetooth) { toast('❌ Web Bluetooth not supported.'); return; }
   setBLE(null); toast('🔍 Scanning…');
@@ -164,7 +171,7 @@ function scheduleReconnect() {
   bleReconnecting = true;
   const delay = BLE_RECONNECT_DELAY * Math.pow(1.5, bleReconnectAttempts);
   bleReconnectAttempts++;
-  toast(`🔄 Reconnecting (${bleReconnectAttempts}/${BLE_RECONNECT_MAX})…`);
+  toast(`🔄 Reconnecting (${bleReconnectAttempts}/${BLE_RECONNECT_MAX})… tap BLE to cancel`);
   bleReconnectTimer = setTimeout(async () => {
     bleReconnecting = false;
     if (bleConnected || !bleDevice) return;
