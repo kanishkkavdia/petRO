@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#090d18">
 <link rel="manifest" href="manifest.json">
-<title>petRO Dashboard</title>
+<title>petRO</title>
 <link rel="apple-touch-icon" href="https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/robot/default/48px.svg">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;900&family=Space+Mono:wght@400;700&display=swap');
@@ -76,7 +76,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .face-wrap { width: min(380px, 92vw); flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; }
 .face-wrap svg { width: 100%; height: auto; display: block; overflow: visible; transition: all 0.3s; }
 
-/* ── Listening Status Text ── */
+/* ── Listening Status Text (Replaces Overlay) ── */
 #listeningStatus {
   position: absolute; bottom: -30px; left: 50%; transform: translateX(-50%);
   font-size: 0.8rem; font-weight: 700; color: var(--theme-color);
@@ -105,7 +105,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
   #chatSection { flex:1; min-height:100svh; }
 }
 
-/* ── D-PAD & MINI PLAYER ── */
+/* ── D-PAD & MINI PETRO ── */
 #normalControls { display: flex; flex-direction: column; gap: 14px; }
 .dpad { display:grid; grid-template-areas:". up ." "left stop right" ". down ."; gap:8px; justify-content:center; }
 .dp { width:58px; height:58px; border-radius:16px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:1.3rem; cursor:pointer; transition:all 0.1s; display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; touch-action: manipulation; }
@@ -120,6 +120,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 .act { padding:12px 6px; border-radius:14px; border:1px solid var(--border); background:var(--card); color:var(--text); font-family:'Nunito',sans-serif; font-size:0.82rem; font-weight:700; cursor:pointer; transition:all 0.1s; display:flex; align-items:center; justify-content:center; gap:5px; touch-action: manipulation; }
 .act:active { background:var(--theme-glow); border-color:var(--theme-color); color:var(--theme-color); transform:scale(0.96); }
 
+/* Mini petRO for YouTube Mode */
 #miniPetroArea { display:none; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:15px; text-align:center; opacity:0; transition: opacity 0.5s; }
 .mini-petro-svg { width: 120px; height: 120px; animation: badge-pulse 2s infinite; border-radius: 50%; background: var(--card); border: 2px solid var(--theme-color); padding: 10px; }
 .mini-title { font-size: 1.1rem; font-weight: 700; color: var(--theme-color); }
@@ -203,6 +204,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%) translateY(70px); background:var(--card); border:1px solid var(--border); border-radius:12px; padding:8px 16px; font-size:0.8rem; transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1); z-index:999; pointer-events:none; max-width:300px; text-align:center; }
 #toast.show { transform:translateX(-50%) translateY(0); }
 
+/* ── MEMORY INDICATOR ── */
 #memoryPill { font-size:0.6rem; color:var(--muted); text-align:center; padding:2px 8px; opacity:0.6; }
 
 /* ── YOUTUBE API OVERLAY ── */
@@ -219,12 +221,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 <body>
 
 <div id="topbar">
-  <div class="logo" id="logoText">pet<span>RO</span></div>
+  <div class="logo">pet<span>RO</span></div>
   <div class="topbar-right">
     <div class="badge"            id="fsBtn"     onclick="toggleFullscreen()"   title="Toggle Fullscreen">⛶ FS</div>
     <div class="badge mic-off"    id="micBadge"  onclick="toggleAlwaysOnMic()"  title="Toggle wake word mic">🎤 OFF</div>
     <div class="badge key-missing" id="keyBadge" onclick="openSettings()"       title="Gemini API key">🔑 KEY</div>
-    <div class="badge ble-off"    id="bleBtn"    onclick="toggleBLE()"          title="Connect to BLE">⚫ BLE</div>
+    <div class="badge ble-off"    id="bleBtn"    onclick="toggleBLE()"          title="Connect to petRO BLE">⚫ BLE</div>
     <div class="badge"            id="settingsBtn" onclick="openSettings()"     style="color:var(--muted)">⚙</div>
   </div>
 </div>
@@ -357,7 +359,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
         <circle cx="70" cy="45" r="15" fill="var(--theme-color)"/>
         <path d="M 35 70 Q 50 85 65 70" fill="none" stroke="var(--theme-color)" stroke-width="4" stroke-linecap="round"/>
       </svg>
-      <div class="mini-title">Robot is chilling</div>
+      <div class="mini-title">petRO is chilling</div>
       <div class="mini-sub">D-Pad disabled while video plays.</div>
     </div>
 
@@ -367,16 +369,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     
     <div id="ytContainer">
       <div id="ytHeader">
-        <span style="font-weight: bold; font-size: 0.8rem;">Media Player</span>
+        <span style="font-weight: bold; font-size: 0.8rem;">petRO Media Player</span>
         <button class="close-yt-btn" onclick="closeYouTube()">Close</button>
       </div>
       <div id="ytPlayerDiv"></div>
     </div>
 
-    <div class="section-label" style="padding-top:14px;">💬 Chat</div>
+    <div class="section-label" style="padding-top:14px;">💬 Chat with petRO</div>
     <div id="messages">
       <div class="msg bot">
-        <div class="msg-label" id="welcomeLabel">petRO 🤖</div>
+        <div class="msg-label">petRO 🤖</div>
         <div class="msg-bubble">Hi! Tap <b>⚙ Settings</b> to customize me, add your API key, connect BLE and let's chat!</div>
       </div>
     </div>
@@ -413,19 +415,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
     </div>
 
     <div class="settings-row">
-      <div class="settings-label">🤖 Pet Name</div>
-      <div class="settings-input-wrap">
-        <input class="settings-input" type="text" id="petNameInput" placeholder="Name your pet (e.g. petRO)">
-      </div>
-    </div>
-    <div class="settings-row">
       <div class="settings-label">👤 Your Identity</div>
       <div class="settings-input-wrap">
         <input class="settings-input" type="text" id="userNameInput" placeholder="Your name">
       </div>
     </div>
     <div class="settings-row">
-      <div class="settings-label">🎭 Theme</div>
+      <div class="settings-label">🎭 petRO Theme</div>
       <select id="themeSelect" class="settings-input" onchange="applyTheme()">
         <option value="default">Default (Friendly Robot)</option>
         <option value="dog">Robot Dog</option>
@@ -456,7 +452,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Nunito', sans-se
 
     <div class="settings-row">
       <div class="settings-label">⏱️ Follow-up Window</div>
-      <select id="followUpSelect" class="settings-input" onchange="savePersonalization()">
+      <select id="followUpSelect" class="settings-input">
         <option value="0">None (Say wake word every time)</option>
         <option value="5000">5 Seconds</option>
         <option value="10000">10 Seconds</option>
