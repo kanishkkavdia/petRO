@@ -4,6 +4,13 @@
 // CONFIG & THEMES
 // ════════════════════════════════════════════════════════
 const WAKE_WORDS  = ['ok petro','okay petro','hey petro','petro'];
+// Fuzzy wake matching — catches common mishearings of "petro"
+const WAKE_REGEX = /\b(?:ok(?:ay)?\s+|hey\s+)?(petro|pedro|petrol|petra|patro|pet\s?ro|paydro|pettro)\b/i;
+function matchWake(t) {
+  const m = t.match(WAKE_REGEX);
+  if (!m) return null;
+  return t.slice(m.index + m[0].length).trim(); // text after the wake word (the command), '' if none
+}
 const SLEEP_MS    = 5 * 60 * 1000; 
 const MAX_HISTORY = 50;
 const GEMINI_URL  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
@@ -745,14 +752,46 @@ function stopAllRecog() { try{bgRecog?.abort();}catch{} try{cmdRecog?.abort();}c
 
 function startBgListen() { 
   if(!alwaysOnMic || micState==='cmd' || isVideoPlaying) return; 
-  try{bgRecog?.abort();}catch{} bgRecog = new SR(); bgRecog.continuous=true; bgRecog.interimResults=true; bgRecog.lang='en-US'; micState='wake'; bgRecog.onresult = e => { if(micState!=='wake')return; for(let i=e.resultIndex; i<e.results.length; i++){ const t=e.results[i][0].transcript.toLowerCase(); if(WAKE_WORDS.some(w=>t.includes(w))) wakeWordDetected(); } }; bgRecog.onerror = e => { if(e.error!=='aborted') restartBg(); }; bgRecog.onend = () => { if(alwaysOnMic && micState==='wake') setTimeout(restartBg,300); }; try{bgRecog.start();}catch{} 
+  try{bgRecog?.abort();}catch{}
+  bgRecog = new SR();
+  bgRecog.continuous = true;
+  bgRecog.interimResults = true;
+  bgRecog.lang = 'en-IN';
+  bgRecog.maxAlternatives = 3;
+  micState = 'wake';
+  bgRecog.onresult = e => {
+    if (micState !== 'wake') return;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      for (let a = 0; a < res.length; a++) {
+        const t = res[a].transcript.toLowerCase();
+        const cmd = matchWake(t);
+        if (cmd === null) continue;
+        if (res.isFinal && cmd.length > 1) {
+          // Command spoken in the same breath: "ok petro turn blue"
+          try { bgRecog.abort(); } catch {}
+          resetInactivity();
+          document.getElementById('userInput').value = cmd;
+          appendMsg('user', cmd);
+          doChat(cmd);
+          setTimeout(startBgListen, 800);
+        } else if (res.isFinal || cmd.length === 0) {
+          wakeWordDetected();
+        }
+        return;
+      }
+    }
+  };
+  bgRecog.onerror = e => { if (e.error !== 'aborted') restartBg(); };
+  bgRecog.onend = () => { if (alwaysOnMic && micState === 'wake') restartBg(); };
+  try{bgRecog.start();}catch{}
 }
 
 function restartBg() { if(alwaysOnMic && micState==='wake' && !isVideoPlaying) startBgListen(); }
 function wakeWordDetected() { if(micState==='cmd')return; try{bgRecog?.abort();}catch{} resetInactivity(); showWakeOverlay(); listenForCommand(); }
 function listenForCommand() { 
     micState='cmd'; updateMicBadge('cmd'); 
-    cmdRecog = new SR(); cmdRecog.continuous=false; cmdRecog.interimResults=true; 
+    cmdRecog = new SR(); cmdRecog.continuous=false; cmdRecog.interimResults=true; cmdRecog.lang='en-IN'; cmdRecog.maxAlternatives=3; 
     const sub = document.getElementById('listeningStatus'); sub.textContent = 'Listening...'; 
     cmdRecog.onresult = e => { 
         const last = e.results[e.results.length-1]; const t = last[0].transcript; 
@@ -785,6 +824,8 @@ function startFollowUp() {
   cmdRecog = new SR(); 
   cmdRecog.continuous = false; 
   cmdRecog.interimResults = true; 
+  cmdRecog.lang = 'en-IN';
+  cmdRecog.maxAlternatives = 3;
   
   cmdRecog.onresult = e => { 
       const last = e.results[e.results.length-1]; const t = last[0].transcript; 
